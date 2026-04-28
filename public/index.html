@@ -305,7 +305,7 @@
 
 <body>
     <div class="container">
-        <h1>🐶 DogeBot Bybit</h1>
+        <h1>🐶 Doge - Bot - Bybit</h1>
         <h2>Identificador de Entradas — DOGEUSDT (15M)</h2>
 
         <div class="status">
@@ -616,85 +616,105 @@ ${dir}
         function analyzeSignal(candles) {
             if (candles.length < BB_PERIOD + 10) return null;
 
-            const closes   = candles.map(c => c.close);
-            const highs    = candles.map(c => c.high);
-            const lows     = candles.map(c => c.low);
-            const price    = closes[closes.length - 1];
+            const closes = candles.map(c => c.close);
+            const highs = candles.map(c => c.high);
+            const lows = candles.map(c => c.low);
+            const price = closes[closes.length - 1];
             const prevClose = closes[closes.length - 2];
 
-            const bb     = bollingerBands(closes, BB_PERIOD, BB_STD);
+            const bb = bollingerBands(closes, BB_PERIOD, BB_STD);
             const rsiArr = rsi(closes, RSI_PERIOD);
-            const stoch  = stochastic(highs, lows, closes, STOCH_K, STOCH_SLOW_K, STOCH_D);
-            const pat    = candlePattern(candles);
+            const stoch = stochastic(highs, lows, closes, STOCH_K, STOCH_SLOW_K, STOCH_D);
+            const pat = candlePattern(candles);
 
-            const lastRsi    = rsiArr[rsiArr.length - 1];
+            const lastRsi = rsiArr[rsiArr.length - 1];
             const lastStochK = stoch.k[stoch.k.length - 1];
             const prevStochK = stoch.k[stoch.k.length - 2];
             const lastStochD = stoch.d[stoch.d.length - 1];
             const prevStochD = stoch.d[stoch.d.length - 2];
 
-            const lastUpper  = bb.upper[bb.upper.length - 1];
-            const lastLower  = bb.lower[bb.lower.length - 1];
-            const prevUpper  = bb.upper[bb.upper.length - 2];
-            const prevLower  = bb.lower[bb.lower.length - 2];
+            const lastUpper = bb.upper[bb.upper.length - 1];
+            const lastLower = bb.lower[bb.lower.length - 1];
 
-            // ── Posição do preço em relação às bandas ─────────────────────
-            const aboveUpper      = price >= lastUpper;
-            const belowLower      = price <= lastLower;
-            const pullbackFromTop = prevClose >= prevUpper && price < lastUpper;
-            const pullbackFromBot = prevClose <= prevLower && price > lastLower;
+            // ── Posição atual do preço ────────────────────────────────────
+            const aboveUpper = price >= lastUpper;
+            const belowLower = price <= lastLower;
+
+            // ── Rompimento nos últimos 5 candles (inclusive o atual) ──────
+            const BB_LOOKBACK = 5;
+            let recentBreakLow = false;
+            let recentBreakHigh = false;
+            for (let offset = 0; offset < BB_LOOKBACK; offset++) {
+                const bIdx = bb.upper.length - 1 - offset;
+                const cIdx = closes.length - 1 - offset;
+                if (bIdx < 0 || cIdx < 0) break;
+                if (closes[cIdx] <= bb.lower[bIdx]) recentBreakLow = true;
+                if (closes[cIdx] >= bb.upper[bIdx]) recentBreakHigh = true;
+            }
+
+            // Pullback: rompeu nos últimos 5c mas voltou pra dentro agora
+            const pullbackFromBot = recentBreakLow && price > lastLower;
+            const pullbackFromTop = recentBreakHigh && price < lastUpper;
 
             let bbStatus;
-            if (aboveUpper)           bbStatus = 'Fora — Acima da Sup';
-            else if (belowLower)      bbStatus = 'Fora — Abaixo da Inf';
-            else if (pullbackFromTop) bbStatus = 'Pullback da Sup ↓';
-            else if (pullbackFromBot) bbStatus = 'Pullback da Inf ↑';
-            else                      bbStatus = 'Dentro das Bandas';
+            if (aboveUpper) bbStatus = 'Fora — Acima da Sup';
+            else if (belowLower) bbStatus = 'Fora — Abaixo da Inf';
+            else if (pullbackFromTop) bbStatus = `Pullback da Sup ↓ (${BB_LOOKBACK}c)`;
+            else if (pullbackFromBot) bbStatus = `Pullback da Inf ↑ (${BB_LOOKBACK}c)`;
+            else bbStatus = 'Dentro das Bandas';
 
             // ── Gate 1: RSI ───────────────────────────────────────────────
-            const longRSI  = lastRsi < RSI_MIN;
+            const longRSI = lastRsi < RSI_MIN;
             const shortRSI = lastRsi > RSI_MAX;
 
             if (!longRSI && !shortRSI) {
-                return { isLong: null, price, rsi: lastRsi, stochK: lastStochK,
+                return {
+                    isLong: null, price, rsi: lastRsi, stochK: lastStochK,
                     bbLabel: bbStatus, candle: pat,
-                    reason: `RSI neutro (${lastRsi.toFixed(1)}) | ${bbStatus}` };
+                    reason: `RSI neutro (${lastRsi.toFixed(1)}) | ${bbStatus}`
+                };
             }
 
-            // ── Gate 2: BB — preço FORA da banda (ou pullback de volta) ───
-            const bbBreakLong  = belowLower || pullbackFromBot;
-            const bbBreakShort = aboveUpper || pullbackFromTop;
+            // ── Gate 2: BB — rompimento em qualquer dos últimos 5 candles ─
+            const bbBreakLong = belowLower || recentBreakLow;
+            const bbBreakShort = aboveUpper || recentBreakHigh;
 
             // ── Gate 3: Estocástico — cruzamento K/D na direção certa ─────
             // LONG:  K cruzou D para cima  (reversão de baixa)
             // SHORT: K cruzou D para baixo (reversão de alta)
-            const stochCrossUp   = prevStochK <= prevStochD && lastStochK > lastStochD;
+            const stochCrossUp = prevStochK <= prevStochD && lastStochK > lastStochD;
             const stochCrossDown = prevStochK >= prevStochD && lastStochK < lastStochD;
 
             // ── Sinal confirmado: todos os 3 gates atendidos ──────────────
             if (longRSI && bbBreakLong && stochCrossUp) {
-                const bbLabel = belowLower ? 'Fora — Abaixo da Inf ✓' : 'Pullback da Inf ✓';
-                return { isLong: true, price, rsi: lastRsi, stochK: lastStochK,
-                    bbLabel, candle: pat };
+                const bbLabel = belowLower ? 'Fora — Abaixo da Inf ✓' : `Pullback da Inf ✓ (${BB_LOOKBACK}c)`;
+                return {
+                    isLong: true, price, rsi: lastRsi, stochK: lastStochK,
+                    bbLabel, candle: pat
+                };
             }
 
             if (shortRSI && bbBreakShort && stochCrossDown) {
-                const bbLabel = aboveUpper ? 'Fora — Acima da Sup ✓' : 'Pullback da Sup ✓';
-                return { isLong: false, price, rsi: lastRsi, stochK: lastStochK,
-                    bbLabel, candle: pat };
+                const bbLabel = aboveUpper ? 'Fora — Acima da Sup ✓' : `Pullback da Sup ✓ (${BB_LOOKBACK}c)`;
+                return {
+                    isLong: false, price, rsi: lastRsi, stochK: lastStochK,
+                    bbLabel, candle: pat
+                };
             }
 
             // ── Sinal parcial: informa o que está faltando ────────────────
             const rsiDir = longRSI ? `Sobrevendido (${lastRsi.toFixed(1)})` : `Sobrecomprado (${lastRsi.toFixed(1)})`;
-            const bbOk   = longRSI ? bbBreakLong  : bbBreakShort;
-            const stOk   = longRSI ? stochCrossUp : stochCrossDown;
-            let pending  = [];
+            const bbOk = longRSI ? bbBreakLong : bbBreakShort;
+            const stOk = longRSI ? stochCrossUp : stochCrossDown;
+            let pending = [];
             if (!bbOk) pending.push('rompimento da banda');
             if (!stOk) pending.push('cruzamento K/D do Stoch');
 
-            return { isLong: null, price, rsi: lastRsi, stochK: lastStochK,
+            return {
+                isLong: null, price, rsi: lastRsi, stochK: lastStochK,
                 bbLabel: bbStatus, candle: pat,
-                reason: `RSI ${rsiDir} — aguardando: ${pending.join(' e ')}` };
+                reason: `RSI ${rsiDir} — aguardando: ${pending.join(' e ')}`
+            };
         }
 
         async function checkSignal() {
@@ -743,7 +763,7 @@ ${dir}
 
         function setBtnState(running) {
             document.getElementById('start-btn').disabled = running;
-            document.getElementById('stop-btn').disabled  = !running;
+            document.getElementById('stop-btn').disabled = !running;
         }
 
         function startBot() {
@@ -778,7 +798,7 @@ ${dir}
         document.addEventListener('DOMContentLoaded', () => {
             setBtnState(false);
             updateStatus('✅ Pronto para iniciar!');
-            log('🐶 DogeBot carregado. Estratégia: RSI(14) + rompimento BB(20,2) + cruzamento K/D Stoch(14,3,3)');
+            log('🐶 Doge - Bot carregado. Estratégia: RSI(14) + rompimento BB(20,2) + cruzamento K/D Stoch(14,3,3)');
         });
     </script>
 </body>
