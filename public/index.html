@@ -414,6 +414,10 @@
         const TELEGRAM_CHAT_ID = '@bybit_alertas_canal';
         const TELEGRAM_URL     = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`;
 
+        // Gemini AI
+        const GEMINI_API_KEY = 'AIzaSyAZbBNVlXCY8MvdWEcGaQUXzOcOxK9iuGU';
+        const GEMINI_URL     = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
+
         let botInterval = null;
         let isRunning = false;
         let lastSignalTimestamp = null;
