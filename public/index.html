@@ -363,8 +363,8 @@
         const BB_PERIOD = 20;            // Bollinger Bands — também define TP/SL
         const BB_STD = 2;
         const RSI_PERIOD = 14;
-        const RSI_OVERSOLD = 30;         // IFR cruza abaixo → LONG em tendência de alta
-        const RSI_OVERBOUGHT = 70;       // IFR cruza acima → SHORT em tendência de baixa
+        const RSI_OVERSOLD = 35;         // IFR cruza abaixo → LONG em tendência de alta
+        const RSI_OVERBOUGHT = 65;       // IFR cruza acima → SHORT em tendência de baixa
         const EMA_TREND_PERIOD = 50;     // EMA50 para detectar tendência
         const MAX_LEVERAGE = 15;
         const POSITION_SIZE = 50;
@@ -424,8 +424,8 @@
             const dir = isLong ? '🟢 LONG (COMPRA)' : '🔴 SHORT (VENDA)';
             const trendLabel = trend === 'up' ? '🔼 Alta (EMA50)' : '🔽 Baixa (EMA50)';
             const rsiCrossLabel = isLong
-                ? `IFR(14) cruzou abaixo de 30 → pullback em tendência de alta`
-                : `IFR(14) cruzou acima de 70 → pullback em tendência de baixa`;
+                ? `IFR(14) cruzou abaixo de 35 → pullback em tendência de alta`
+                : `IFR(14) cruzou acima de 65 → pullback em tendência de baixa`;
             const entrada = bankValue * (POSITION_SIZE / 100);
             const tpPct = ((Math.abs(tpPrice - price) / price) * 100).toFixed(2);
             const slPct = ((Math.abs(slPrice - price) / price) * 100).toFixed(2);
@@ -768,7 +768,7 @@ ${dir}
             setBtnState(false);
             updateStatus('✅ Pronto para iniciar!');
             log('📊 Bot carregado. Estratégia: IFR(14) contra tendência (EMA50) — Todos os ativos USDT (1H)');
-            log('ℹ️  Alta + IFR < 30 = 🟢 LONG | Baixa + IFR > 70 = 🔴 SHORT');
+            log('ℹ️  Alta + IFR < 35 = 🟢 LONG | Baixa + IFR > 65 = 🔴 SHORT');
             log('📐 TP = Banda Superior BB(20,2) | SL = Banda Inferior BB(20,2)');
         });
     </script>
