@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bot de Trading de Criptos - v4.0</title>
+    <title>DogeBot Bybit</title>
     <style>
         body {
             font-family: 'Inter', -apple-system, sans-serif;
@@ -65,19 +65,6 @@
             font-weight: 600;
         }
 
-        .warning {
-            background: #2E1C1B;
-            border: 1px solid #D73A49;
-            color: #FF6B6B;
-            padding: 12px;
-            border-radius: 8px;
-            margin: 16px 0;
-            font-size: 14px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
         .controls {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -103,20 +90,18 @@
         }
 
         button.stop-btn {
-            background:
-
-                #D73A49;
+            background: #D73A49;
         }
 
         button.stop-btn:hover {
             background: #FF6B6B;
         }
 
-        button.test-btn {
+        button.clear-btn {
             background: #4A90E2;
         }
 
-        button.test-btn:hover {
+        button.clear-btn:hover {
             background: #5DAEFF;
         }
 
@@ -225,6 +210,97 @@
             }
         }
 
+        #signal-card {
+            display: none;
+            padding: 20px;
+            border-radius: 12px;
+            margin: 16px 0;
+            border: 2px solid;
+            animation: pulse 0.6s ease;
+        }
+
+        #signal-card.long {
+            background: #0D2B1A;
+            border-color: #28A745;
+        }
+
+        #signal-card.short {
+            background: #2B0D0D;
+            border-color: #D73A49;
+        }
+
+        @keyframes pulse {
+            0% {
+                transform: scale(1);
+            }
+
+            50% {
+                transform: scale(1.02);
+            }
+
+            100% {
+                transform: scale(1);
+            }
+        }
+
+        #signal-card .signal-title {
+            font-size: 22px;
+            font-weight: 700;
+            margin-bottom: 12px;
+        }
+
+        #signal-card .signal-rows {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 10px;
+        }
+
+        #signal-card .signal-item {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            padding: 10px 14px;
+            font-size: 14px;
+        }
+
+        #signal-card .signal-item span {
+            display: block;
+            font-size: 11px;
+            color: #A0A4AA;
+            margin-bottom: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        #ai-analysis {
+            display: none;
+            margin-top: 16px;
+            background: rgba(100, 90, 200, 0.08);
+            border: 1px solid #5B4FCF;
+            border-radius: 10px;
+            padding: 14px 16px;
+        }
+
+        #ai-analysis .ai-header {
+            font-size: 12px;
+            color: #9B8FE8;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+
+        #ai-analysis .ai-text {
+            font-size: 14px;
+            color: #DDD9FF;
+            line-height: 1.6;
+            white-space: pre-wrap;
+        }
+
+        #ai-analysis.loading .ai-text {
+            color: #6E7681;
+            font-style: italic;
+        }
+
         @media (max-width: 600px) {
             body {
                 padding: 16px;
@@ -253,33 +329,43 @@
 
 <body>
     <div class="container">
-        <h1>Bot de Trading de Criptos v4.0</h1>
-        <h2>Monitoramento de DOGE, ETH, BTC, BNB, XRP (4H)</h2>
-        <div class="warning">
-            ⚠️ Atenção: Nunca exponha seu token do Telegram em código público. Execute este script em um servidor
-            seguro.
-        </div>
+        <h1>🐶 DogeBot Bybit</h1>
+        <h2>Identificador de Entradas — DOGEUSDT (15M)</h2>
+
         <div class="status">
             <strong>Status:</strong> <span id="status">Inicializando...</span>
         </div>
-        <div class="test-section">
-            <h3>Teste de Conexão</h3>
-            <p>Verifique o envio de mensagens para o Telegram:</p>
-            <button class="test-btn tooltip" onclick="sendTestMessage()">
-                Enviar Teste
-                <span class="tooltiptext">Envia uma mensagem de teste para o Telegram</span>
-            </button>
+
+        <div id="signal-card">
+            <div class="signal-title" id="signal-title"></div>
+            <div class="signal-rows">
+                <div class="signal-item"><span>Ativo</span><strong id="sig-symbol">—</strong></div>
+                <div class="signal-item"><span>Entrada</span><strong id="sig-entry">—</strong></div>
+                <div class="signal-item"><span>Alavancagem</span><strong id="sig-leverage">—</strong></div>
+                <div class="signal-item"><span>Banca sugerida</span><strong id="sig-size">50%</strong></div>
+                <div class="signal-item"><span>Take Profit</span><strong id="sig-tp">—</strong></div>
+                <div class="signal-item"><span>Stop Loss</span><strong id="sig-sl">—</strong></div>
+                <div class="signal-item"><span>RSI (14)</span><strong id="sig-rsi">—</strong></div>
+                <div class="signal-item"><span>Stoch %K</span><strong id="sig-stoch">—</strong></div>
+                <div class="signal-item"><span>Banda (BB)</span><strong id="sig-bb">—</strong></div>
+                <div class="signal-item"><span>Candle</span><strong id="sig-candle">—</strong></div>
+            </div>
+            <div id="ai-analysis">
+                <div class="ai-header">🤖 Análise Gemini</div>
+                <div class="ai-text" id="ai-text">Aguardando...</div>
+            </div>
         </div>
+
         <div>
             <h3>Controles</h3>
             <div class="controls">
                 <div>
-                    <label for="entryValue">Valor de Entrada (USD):</label>
-                    <input type="number" id="entryValue" min="1" placeholder="Ex.: 200" />
+                    <label for="bankValue">Valor da Banca (USD):</label>
+                    <input type="number" id="bankValue" min="1" placeholder="Ex.: 200" />
                 </div>
                 <button class="tooltip" onclick="startBot()">
                     Iniciar Bot
-                    <span class="tooltiptext">Inicia o monitoramento automático</span>
+                    <span class="tooltiptext">Inicia o monitoramento automático a cada 5 min</span>
                 </button>
                 <button class="stop-btn tooltip" onclick="stopBot()">
                     Parar Bot
@@ -291,91 +377,199 @@
                 </button>
             </div>
         </div>
+
         <div>
             <h3>Log de Atividades</h3>
             <div id="log"></div>
-            <button class="test-btn" style="margin-top: 12px;" onclick="clearLog()">Limpar Log</button>
+            <button class="clear-btn" style="margin-top: 12px;" onclick="clearLog()">Limpar Log</button>
         </div>
+
         <div id="snackbar" class="snackbar"></div>
     </div>
     <script>
-        // Configurações
-        const telegramBotToken = "7638628732:AAHFNGTcoikDyJctbMXD1MbQlwRsR70Npn8";
-        const telegramChatId = "@DogeEntradas";
-        const ENTRY_PROFILE = {
-            leverage: "10x",
-            positionSize: "10%",
-            longTP: "+4%",
-            longSL: "-2%",
-            shortTP: "-4%",
-            shortSL: "+2%",
-            partialTP: "+2%", // Take parcial
-            trailingStop: true // Ativar trailing stop
-        };
-        const DEFAULT_ENTRY_VALUE = 100;
-        const ADX_MINIMO_TENDENCIA = 25;
-        const MIN_SCORE = 4; // Pontuação mínima para entrada
-        const checkInterval = 10 * 60 * 1000;
+        const SYMBOL = 'DOGEUSDT';
+        const INTERVAL = '15';
+        const BB_PERIOD = 20;
+        const BB_STD = 2;
+        const RSI_PERIOD = 14;
+        const RSI_MAX = 65;
+        const RSI_MIN = 35;
+        const STOCH_K = 14;
+        const STOCH_SLOW_K = 3;
+        const STOCH_D = 3;
+        const STOCH_MAX = 80;
+        const STOCH_MIN = 20;
+        const MAX_LEVERAGE = 15;
+        const POSITION_SIZE = 50;
+        const LONG_TP_PCT = 2.0;
+        const LONG_SL_PCT = 1.0;
+        const SHORT_TP_PCT = 2.0;
+        const SHORT_SL_PCT = 1.0;
+        const MIN_AUX = 1;
+        const checkInterval = 5 * 60 * 1000;
         const apiKlineUrl = "https://api.bybit.com/v5/market/kline";
 
         let botInterval = null;
         let isRunning = false;
-        let lastSignalTimestamps = {};
+        let lastSignalTimestamp = null;
 
         function log(message) {
-            const logElement = document.getElementById('log');
-            const timestamp = new Date().toLocaleString('pt-BR');
-            logElement.innerHTML += `[${timestamp}] ${message}<br>`;
-            logElement.scrollTop = logElement.scrollHeight;
+            const el = document.getElementById('log');
+            const ts = new Date().toLocaleString('pt-BR');
+            el.innerHTML += `[${ts}] ${message}<br>`;
+            el.scrollTop = el.scrollHeight;
         }
 
         function clearLog() {
             document.getElementById('log').innerHTML = '';
-            showSnackbar('Log limpo com sucesso!');
+            showSnackbar('Log limpo!');
         }
 
-        function updateStatus(status) {
-            document.getElementById('status').innerHTML = status;
+        function updateStatus(s) {
+            document.getElementById('status').innerHTML = s;
         }
 
-        function showSnackbar(message) {
-            const snackbar = document.getElementById('snackbar');
-            snackbar.textContent = message;
-            snackbar.className = 'snackbar show';
-            setTimeout(() => { snackbar.className = 'snackbar'; }, 3000);
+        function showSnackbar(msg) {
+            const sb = document.getElementById('snackbar');
+            sb.textContent = msg;
+            sb.className = 'snackbar show';
+            setTimeout(() => { sb.className = 'snackbar'; }, 3000);
         }
 
-        async function sendTestMessage() {
+        async function askGemini(direction, price, rsiVal, stochVal, bbStatus, candlePat, auxScore) {
+            const dir = direction ? 'LONG (compra)' : 'SHORT (venda)';
+            const prompt = `Você é um assistente de trading técnico especializado em criptomoedas. Forneça uma análise objetiva com base nos dados abaixo, seguindo exatamente a estrutura solicitada.
+
+**Contexto da estratégia (Pullback em DOGEUSDT)**
+- Timeframe: 15 minutos (Bybit, futuros)
+- Gatilhos de entrada:
+  - **Compra**: RSI(14) < 35 **e** Estocástico %K(14,3,3) < 20, com preço próximo/abaixo da Banda de Bollinger inferior
+  - **Venda**: RSI(14) > 65 **e** Estocástico %K > 80, com preço próximo/acima da Banda de Bollinger superior
+- Filtros auxiliares: Padrão de candle de reversão e Pontuação auxiliar (0-100) reforçam o sinal.
+
+**Dados atuais do candle**
+- Direção da entrada sugerida: ${dir}   // "COMPRA" ou "VENDA"
+- Preço atual: ${price.toFixed(6)} USDT
+- RSI(14): ${rsiVal.toFixed(2)}
+- Estocástico %K: ${stochVal.toFixed(2)}
+- Posição nas Bandas de Bollinger: ${bbStatus}   // ex.: "tocou banda inferior", "banda superior", "entre as bandas"
+- Padrão de candle detectado: ${candlePat || 'Nenhum'}
+- Pontuação auxiliar (0-100): ${auxScore}   // consolida múltiplos fatores técnicos
+
+**Tarefa** (responda em português, máximo 5 frases, com o formato exato abaixo):
+
+1. **Ação**: [COMPRAR / VENDER / AGUARDAR]
+2. **Confiança**: [BAIXA / MÉDIA / ALTA]
+3. **Justificativa**: (1-2 frases mencionando a confluência ou divergência dos indicadores, e se o padrão de candle e a pontuação auxiliar reforçam ou enfraquecem o sinal)
+4. **Riscos**: (1 frase com o principal ponto de atenção, ex.: divergência de volume, resistência próxima, estocástico ainda caindo)
+5. **Gestão sugerida**: Stop loss em [valor] USDT (método: abaixo/ acima da mínima/máxima do candle de sinal ou da banda) | Take profit parcial em [valor] USDT (ex.: banda oposta ou resistência/suporte).
+
+Exemplo de resposta esperada (com dados hipotéticos):
+1. Ação: COMPRAR
+2. Confiança: MÉDIA
+3. Justificativa: RSI sobrevendido e martelo na banda inferior, com estocástico virando e pontuação auxiliar alta (75). O contexto de tendência ainda é baixista, o que reduz a confiança.
+4. Riscos: Forte pressão vendedora pode romper a banda inferior sem reação.
+5. Gestão sugerida: Stop loss em 0.1548 USDT (abaixo do martelo) | Take profit parcial em 0.1630 USDT (banda do meio).`;
+
+            const body = {
+                contents: [{ parts: [{ text: prompt }] }],
+                generationConfig: { maxOutputTokens: 300, temperature: 0.3 }
+            };
+
+            const res = await fetch(GEMINI_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+
+            if (!res.ok) throw new Error(`Gemini HTTP ${res.status}`);
+            const json = await res.json();
+            return json.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || 'Sem resposta da IA.';
+        }
+
+        function showAiLoading() {
+            const box = document.getElementById('ai-analysis');
+            box.style.display = 'block';
+            box.classList.add('loading');
+            document.getElementById('ai-text').textContent = 'Consultando Gemini...';
+        }
+
+        function showAiResult(text) {
+            const box = document.getElementById('ai-analysis');
+            box.classList.remove('loading');
+            document.getElementById('ai-text').textContent = text;
+        }
+
+        function hideAiAnalysis() {
+            document.getElementById('ai-analysis').style.display = 'none';
+        }
+
+        function playAlert(isLong) {
             try {
-                log('Enviando mensagem de teste...');
-                const now = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
-                const testMsg = `✅ Teste do Bot de Trading v4.0\nData: ${now}`;
-                await sendTelegramMessage(testMsg);
-                log('✅ Mensagem de teste enviada!');
-                showSnackbar('Mensagem de teste enviada!');
-            } catch (error) {
-                log(`❌ Erro no teste: ${error.message}`);
-                showSnackbar('Erro ao enviar mensagem de teste.');
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const freqs = isLong ? [660, 880] : [440, 330];
+                freqs.forEach((freq, i) => {
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+                    osc.type = 'sine';
+                    osc.frequency.value = freq;
+                    gain.gain.setValueAtTime(0.25, ctx.currentTime + i * 0.25);
+                    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.25 + 0.4);
+                    osc.start(ctx.currentTime + i * 0.25);
+                    osc.stop(ctx.currentTime + i * 0.25 + 0.4);
+                });
+            } catch (e) {
+                // AudioContext pode ser bloqueado antes de interação do usuário
             }
         }
 
-        async function sendTelegramMessage(msg) {
-            const response = await fetch(`https://api.telegram.org/bot${telegramBotToken}/sendMessage`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ chat_id: telegramChatId, text: msg })
-            });
-            if (!response.ok) throw new Error(`Erro Telegram: ${await response.text()}`);
-            return response.json();
+        function showSignalCard(isLong, price, rsi, stochK, bbLabel, candleLabel) {
+            const card = document.getElementById('signal-card');
+            card.className = 'signal-card ' + (isLong ? 'long' : 'short');
+            card.style.display = 'block';
+
+            const bankInput = document.getElementById('bankValue').value;
+            const bank = (bankInput && Number(bankInput) > 0) ? Number(bankInput) : 100;
+            const entrada = bank * (POSITION_SIZE / 100);
+            const tpPct = isLong ? LONG_TP_PCT : SHORT_TP_PCT;
+            const slPct = isLong ? LONG_SL_PCT : SHORT_SL_PCT;
+            const tpPrice = isLong
+                ? (price * (1 + tpPct / 100)).toFixed(6)
+                : (price * (1 - tpPct / 100)).toFixed(6);
+            const slPrice = isLong
+                ? (price * (1 - slPct / 100)).toFixed(6)
+                : (price * (1 + slPct / 100)).toFixed(6);
+
+            const rsiDist = isLong ? (RSI_MIN - rsi) : (rsi - RSI_MAX);
+            const leverage = Math.min(MAX_LEVERAGE, rsiDist > 5 ? MAX_LEVERAGE : 10);
+
+            document.getElementById('signal-title').textContent =
+                isLong ? '🟢 ENTRADA LONG (COMPRA)' : '🔴 ENTRADA SHORT (VENDA)';
+            document.getElementById('sig-symbol').textContent = SYMBOL;
+            document.getElementById('sig-entry').textContent = price.toFixed(6);
+            document.getElementById('sig-leverage').textContent = leverage + 'x';
+            document.getElementById('sig-size').textContent = POSITION_SIZE + '%  ($' + entrada.toFixed(2) + ')';
+            document.getElementById('sig-tp').textContent = (isLong ? '+' : '-') + tpPct + '%  (~' + tpPrice + ')';
+            document.getElementById('sig-sl').textContent = (isLong ? '-' : '+') + slPct + '%  (~' + slPrice + ')';
+            document.getElementById('sig-rsi').textContent = rsi.toFixed(2);
+            document.getElementById('sig-stoch').textContent = stochK.toFixed(2);
+            document.getElementById('sig-bb').textContent = bbLabel;
+            document.getElementById('sig-candle').textContent = candleLabel || '—';
         }
 
-        async function fetchKlineData(symbol, interval = "240") {
-            const params = new URLSearchParams({ category: "linear", symbol, interval, limit: "200" });
+        function hideSignalCard() {
+            document.getElementById('signal-card').style.display = 'none';
+        }
+
+        async function fetchKlineData(symbol, interval, limit = 200) {
+            const params = new URLSearchParams({ category: 'linear', symbol, interval, limit: String(limit) });
             try {
-                const response = await fetch(`${apiKlineUrl}?${params}`);
-                if (!response.ok) throw new Error(`Erro API Bybit: ${response.statusText}`);
-                const json = await response.json();
-                if (json.retCode !== 0) throw new Error(`Erro API: ${json.retMsg}`);
+                const res = await fetch(`${apiKlineUrl}?${params}`);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const json = await res.json();
+                if (json.retCode !== 0) throw new Error(json.retMsg);
                 return json.result.list.map(item => ({
                     time: Number(item[0]),
                     open: Number(item[1]),
@@ -384,347 +578,259 @@
                     close: Number(item[4]),
                     volume: Number(item[5])
                 })).reverse();
-            } catch (error) {
-                log(`❌ Erro ao buscar dados de ${symbol}: ${error.message}`);
+            } catch (err) {
+                log(`❌ Erro ao buscar dados: ${err.message}`);
                 return [];
             }
         }
 
-        async function fetchDailyData(symbol) {
-            return await fetchKlineData(symbol, "D");
+        function bollingerBands(closes, period, stdMultiplier) {
+            const upper = [], middle = [], lower = [];
+            for (let i = period - 1; i < closes.length; i++) {
+                const slice = closes.slice(i - period + 1, i + 1);
+                const mean = slice.reduce((a, b) => a + b, 0) / period;
+                const vari = slice.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / period;
+                const sd = Math.sqrt(vari);
+                upper.push(mean + stdMultiplier * sd);
+                middle.push(mean);
+                lower.push(mean - stdMultiplier * sd);
+            }
+            return { upper, middle, lower };
         }
 
-        // Indicadores Técnicos
-        function sma(data, period) {
-            let sums = [];
-            for (let i = 0; i <= data.length - period; i++) {
-                let sum = 0;
-                for (let j = 0; j < period; j++) sum += data[i + j];
-                sums.push(sum / period);
+        function rsi(closes, period) {
+            const gains = [], losses = [];
+            for (let i = 1; i < closes.length; i++) {
+                const d = closes[i] - closes[i - 1];
+                gains.push(d > 0 ? d : 0);
+                losses.push(d < 0 ? -d : 0);
             }
-            return sums;
-        }
-
-        function ema(data, period) {
-            const k = 2 / (period + 1);
-            let emaData = [data[0]];
-            for (let i = 1; i < data.length; i++) {
-                emaData.push(data[i] * k + emaData[i - 1] * (1 - k));
-            }
-            return emaData;
-        }
-
-        function rsi(data, period = 14) {
-            let gains = [], losses = [];
-            for (let i = 1; i < data.length; i++) {
-                const diff = data[i] - data[i - 1];
-                gains.push(diff > 0 ? diff : 0);
-                losses.push(diff < 0 ? -diff : 0);
-            }
-            let avgGain = gains.slice(0, period).reduce((a, b) => a + b, 0) / period;
-            let avgLoss = losses.slice(0, period).reduce((a, b) => a + b, 0) / period;
-            let rsiValues = [100 - (100 / (1 + (avgGain / avgLoss)))];
+            let avgG = gains.slice(0, period).reduce((a, b) => a + b, 0) / period;
+            let avgL = losses.slice(0, period).reduce((a, b) => a + b, 0) / period;
+            const vals = [avgL === 0 ? 100 : 100 - 100 / (1 + avgG / avgL)];
             for (let i = period; i < gains.length; i++) {
-                avgGain = (avgGain * (period - 1) + gains[i]) / period;
-                avgLoss = (avgLoss * (period - 1) + losses[i]) / period;
-                rsiValues.push(avgLoss === 0 ? 100 : 100 - (100 / (1 + (avgGain / avgLoss))));
+                avgG = (avgG * (period - 1) + gains[i]) / period;
+                avgL = (avgL * (period - 1) + losses[i]) / period;
+                vals.push(avgL === 0 ? 100 : 100 - 100 / (1 + avgG / avgL));
             }
-            return rsiValues;
+            return vals;
+        }
+
+        function sma(data, period) {
+            const out = [];
+            for (let i = 0; i <= data.length - period; i++) {
+                const s = data.slice(i, i + period).reduce((a, b) => a + b, 0);
+                out.push(s / period);
+            }
+            return out;
         }
 
         function stochastic(highs, lows, closes, kPeriod, kSlowing, dPeriod) {
-            let ll = [], hh = [], k = [];
+            const k = [];
             for (let i = kPeriod - 1; i < closes.length; i++) {
-                ll.push(Math.min(...lows.slice(i - kPeriod + 1, i + 1)));
-                hh.push(Math.max(...highs.slice(i - kPeriod + 1, i + 1)));
+                const ll = Math.min(...lows.slice(i - kPeriod + 1, i + 1));
+                const hh = Math.max(...highs.slice(i - kPeriod + 1, i + 1));
+                k.push(100 * (closes[i] - ll) / (hh - ll || 1));
             }
-            for (let i = 0; i < ll.length; i++) {
-                k.push(100 * (closes[i + kPeriod - 1] - ll[i]) / (hh[i] - ll[i] || 1));
-            }
-            let smoothedK = sma(k, kSlowing);
-            let d = sma(smoothedK, dPeriod);
-            return { k: smoothedK, d };
+            const smoothK = sma(k, kSlowing);
+            const d = sma(smoothK, dPeriod);
+            return { k: smoothK, d };
         }
 
-        function adx(highs, lows, closes, period) {
-            let trs = [], plusDMs = [], minusDMs = [];
-            for (let i = 1; i < highs.length; i++) {
-                let tr1 = highs[i] - lows[i];
-                let tr2 = Math.abs(highs[i] - closes[i - 1]);
-                let tr3 = Math.abs(lows[i] - closes[i - 1]);
-                trs.push(Math.max(tr1, tr2, tr3));
-                let upMove = highs[i] - highs[i - 1];
-                let downMove = lows[i - 1] - lows[i];
-                plusDMs.push((upMove > downMove && upMove > 0) ? upMove : 0);
-                minusDMs.push((downMove > upMove && downMove > 0) ? downMove : 0);
-            }
-            const wildersSmooth = (data) => {
-                let smoothed = [data.slice(0, period).reduce((a, b) => a + b, 0) / period];
-                for (let i = period; i < data.length; i++) {
-                    smoothed.push((smoothed[smoothed.length - 1] * (period - 1) + data[i]) / period);
-                }
-                return smoothed;
-            };
-            let smoothedTR = wildersSmooth(trs);
-            let smoothedPlusDM = wildersSmooth(plusDMs);
-            let smoothedMinusDM = wildersSmooth(minusDMs);
-            let plusDIs = [], minusDIs = [], dxs = [];
-            for (let i = 0; i < smoothedTR.length; i++) {
-                plusDIs.push(100 * (smoothedPlusDM[i] / (smoothedTR[i] || 1)));
-                minusDIs.push(100 * (smoothedMinusDM[i] / (smoothedTR[i] || 1)));
-            }
-            for (let i = 0; i < plusDIs.length; i++) {
-                dxs.push(100 * Math.abs(plusDIs[i] - minusDIs[i]) / (plusDIs[i] + minusDIs[i] || 1));
-            }
-            let adxValues = wildersSmooth(dxs);
-            return { adx: adxValues, plusDI: plusDIs, minusDI: minusDIs };
-        }
+        function candlePattern(candles) {
+            const c = candles[candles.length - 1];
+            const p = candles[candles.length - 2];
+            const cBody = Math.abs(c.close - c.open);
+            const pBody = Math.abs(p.close - p.open);
 
-        function obv(closes, volumes) {
-            let obv = [0];
-            for (let i = 1; i < closes.length; i++) {
-                if (closes[i] > closes[i - 1]) {
-                    obv.push(obv[i - 1] + volumes[i]);
-                } else if (closes[i] < closes[i - 1]) {
-                    obv.push(obv[i - 1] - volumes[i]);
-                } else {
-                    obv.push(obv[i - 1]);
-                }
-            }
-            return obv;
-        }
+            if (c.close > c.open && p.close < p.open &&
+                c.close > p.open && c.open < p.close && cBody > pBody)
+                return 'Engolfo Alta';
 
-        function ichimoku(highs, lows, closes) {
-            const tenkanSen = (period) => {
-                let result = [];
-                for (let i = period - 1; i < highs.length; i++) {
-                    let periodHigh = Math.max(...highs.slice(i - period + 1, i + 1));
-                    let periodLow = Math.min(...lows.slice(i - period + 1, i + 1));
-                    result.push((periodHigh + periodLow) / 2);
-                }
-                return result;
-            };
-            const kijunSen = tenkanSen(26);
-            const tenkan = tenkanSen(9);
-            const senkouSpanA = [];
-            const senkouSpanB = [];
-            for (let i = 25; i < highs.length; i++) {
-                senkouSpanA.push((tenkan[i - 25] + kijunSen[i - 25]) / 2);
-                let periodHigh = Math.max(...highs.slice(i - 51, i + 1));
-                let periodLow = Math.min(...lows.slice(i - 51, i + 1));
-                senkouSpanB.push((periodHigh + periodLow) / 2);
-            }
-            return { tenkan, kijunSen, senkouSpanA, senkouSpanB };
-        }
+            if (c.close < c.open && p.close > p.open &&
+                c.close < p.open && c.open > p.close && cBody > pBody)
+                return 'Engolfo Baixa';
 
-        function candlePatterns(candles) {
-            const lastCandle = candles[candles.length - 1];
-            const prevCandle = candles[candles.length - 2];
-            const body = Math.abs(lastCandle.close - lastCandle.open);
-            const prevBody = Math.abs(prevCandle.close - prevCandle.open);
-            // Engolfo de Alta
-            if (lastCandle.close > lastCandle.open && prevCandle.close < prevCandle.open &&
-                lastCandle.close > prevCandle.open && lastCandle.open < prevCandle.close &&
-                body > prevBody) {
-                return 'bullish_engulfing';
-            }
-            // Engolfo de Baixa
-            if (lastCandle.close < lastCandle.open && prevCandle.close > prevCandle.open &&
-                lastCandle.close < prevCandle.open && lastCandle.open > prevCandle.close &&
-                body > prevBody) {
-                return 'bearish_engulfing';
-            }
-            // Martelo
-            if (lastCandle.close > lastCandle.open && (lastCandle.high - lastCandle.close) < body &&
-                (lastCandle.open - lastCandle.low) > 2 * body) {
-                return 'hammer';
-            }
+            if (c.close > c.open &&
+                (c.open - c.low) > 2 * cBody &&
+                (c.high - c.close) < cBody)
+                return 'Martelo';
+
+            if (c.close < c.open &&
+                (c.high - c.open) > 2 * cBody &&
+                (c.close - c.low) < cBody)
+                return 'Estrela Cadente';
+
             return null;
         }
 
-        function isValidTradingTime() {
-            const now = new Date();
-            const utcHour = now.getUTCHours();
-            const minutes = now.getUTCMinutes();
-            // Evita 23h às 04h UTC
-            if (utcHour >= 23 || utcHour < 4) return false;
-            // Evita últimos 5 minutos do candle 4H
-            const candleMinutes = (minutes % 240);
-            if (candleMinutes >= 235) return false;
-            return true;
-        }
+        function analyzeSignal(candles) {
+            if (candles.length < BB_PERIOD + 10) return null;
 
-        function scoreSignal(isLong, indicators) {
-            let score = 0;
-            const { ema17, ema50, ema72, rsi, adx, stochK, obv, ichimoku, dailyEma50, candlePattern } = indicators;
-            // Critérios de pontuação
-            if (isLong) {
-                if (ema17 > ema50 && ema50 > ema72) score++;
-                if (rsi > 50) score++;
-                if (adx > ADX_MINIMO_TENDENCIA) score++;
-                if (stochK < 80) score++;
-                if (obv[obv.length - 1] > obv[obv.length - 2]) score++;
-                if (ichimoku.senkouSpanA[ichimoku.senkouSpanA.length - 1] < indicators.currentPrice &&
-                    ichimoku.senkouSpanB[ichimoku.senkouSpanB.length - 1] < indicators.currentPrice) score++;
-                if (dailyEma50 < indicators.currentPrice) score++;
-                if (['bullish_engulfing', 'hammer'].includes(candlePattern)) score++;
-            } else {
-                if (ema17 < ema50 && ema50 < ema72) score++;
-                if (rsi < 50) score++;
-                if (adx > ADX_MINIMO_TENDENCIA) score++;
-                if (stochK > 20) score++;
-                if (obv[obv.length - 1] < obv[obv.length - 2]) score++;
-                if (ichimoku.senkouSpanA[ichimoku.senkouSpanA.length - 1] > indicators.currentPrice &&
-                    ichimoku.senkouSpanB[ichimoku.senkouSpanB.length - 1] > indicators.currentPrice) score++;
-                if (dailyEma50 > indicators.currentPrice) score++;
-                if (['bearish_engulfing'].includes(candlePattern)) score++;
-            }
-            return score;
-        }
+            const closes = candles.map(c => c.close);
+            const highs = candles.map(c => c.high);
+            const lows = candles.map(c => c.low);
+            const price = closes[closes.length - 1];
+            const prevClose = closes[closes.length - 2];
 
-        function calculateEstimatedProfit(isShort) {
-            const entryValueInput = document.getElementById('entryValue').value;
-            const entryValue = (entryValueInput && Number(entryValueInput) > 0) ? Number(entryValueInput) : DEFAULT_ENTRY_VALUE;
-            const leverage = 10;
-            const tpPercent = isShort ? -4 : 4;
-            const partialTpPercent = isShort ? -2 : 2;
-            const profit = (entryValue * leverage * Math.abs(tpPercent)) / 100;
-            const partialProfit = (entryValue * leverage * Math.abs(partialTpPercent)) / 100 / 2; // 50% em partial TP
-            return { profit: profit.toFixed(2), partialProfit: partialProfit.toFixed(2), entryValue };
-        }
+            const bb = bollingerBands(closes, BB_PERIOD, BB_STD);
+            const rsiArr = rsi(closes, RSI_PERIOD);
+            const stoch = stochastic(highs, lows, closes, STOCH_K, STOCH_SLOW_K, STOCH_D);
+            const pat = candlePattern(candles);
 
-        async function checkSignal(symbol) {
-            if (!isRunning) return;
-            if (!isValidTradingTime()) {
-                log(`⏳ Horário inválido para análise (${symbol}).`);
-                return;
-            }
-            try {
-                log(`🔍 Verificando ${symbol}...`);
-                const candles = await fetchKlineData(symbol);
-                const dailyCandles = await fetchDailyData(symbol);
-                if (candles.length < 150 || dailyCandles.length < 50) {
-                    log(`❌ Dados insuficientes para ${symbol}.`);
-                    return;
-                }
-                const currentCandleTimestamp = candles[candles.length - 1].time;
-                if (lastSignalTimestamps[symbol] === currentCandleTimestamp) {
-                    log(`⏳ Sinal já enviado para ${symbol} neste candle.`);
-                    return;
-                }
-                const closes = candles.map(c => c.close);
-                const highs = candles.map(c => c.high);
-                const lows = candles.map(c => c.low);
-                const volumes = candles.map(c => c.volume);
-                const dailyCloses = dailyCandles.map(c => c.close);
-                const currentPrice = closes[closes.length - 1];
-                const ema17 = ema(closes, 17);
-                const ema50 = ema(closes, 50);
-                const ema72 = ema(closes, 72);
-                const dailyEma50 = ema(dailyCloses, 50)[ema(dailyCloses, 50).length - 1];
-                const rsi14 = rsi(closes, 14);
-                const stoch = stochastic(highs, lows, closes, 14, 5, 5);
-                const adxResult = adx(highs, lows, closes, 14);
-                const obvValues = obv(closes, volumes);
-                const ichimokuValues = ichimoku(highs, lows, closes);
-                const candlePattern = candlePatterns(candles);
-                const lastEma17 = ema17[ema17.length - 1];
-                const lastEma50 = ema50[ema50.length - 1];
-                const lastEma72 = ema72[ema72.length - 1];
-                const lastRsi = rsi14[rsi14.length - 1];
-                const lastStochK = stoch.k[stoch.k.length - 1];
-                const lastAdx = adxResult.adx[adxResult.adx.length - 1];
-                log(`📊 ${symbol} | Preço: ${currentPrice.toFixed(5)} | RSI: ${lastRsi.toFixed(2)} | ADX: ${lastAdx.toFixed(2)} | OBV: ${obvValues[obvValues.length - 1]}`);
-                const indicators = {
-                    ema17: lastEma17, ema50: lastEma50, ema72: lastEma72, rsi: lastRsi,
-                    adx: lastAdx, stochK: lastStochK, obv: obvValues, ichimoku: ichimokuValues,
-                    dailyEma50: dailyEma50, currentPrice, candlePattern
+            const lastRsi = rsiArr[rsiArr.length - 1];
+            const lastStochK = stoch.k[stoch.k.length - 1];
+            const lastUpper = bb.upper[bb.upper.length - 1];
+            const lastLower = bb.lower[bb.lower.length - 1];
+            const prevUpper = bb.upper[bb.upper.length - 2];
+            const prevLower = bb.lower[bb.lower.length - 2];
+            const lastMiddle = bb.middle[bb.middle.length - 1];
+            const aboveUpper = price >= lastUpper;
+            const belowLower = price <= lastLower;
+            const pullbackFromTop = prevClose >= prevUpper && price < lastUpper;
+            const pullbackFromBot = prevClose <= prevLower && price > lastLower;
+            const nearUpper = price > lastMiddle && price < lastUpper;
+            const nearLower = price < lastMiddle && price > lastLower;
+
+            let bbStatus;
+            if (aboveUpper) bbStatus = 'Fora — Acima da Sup';
+            else if (belowLower) bbStatus = 'Fora — Abaixo da Inf';
+            else if (pullbackFromTop) bbStatus = 'Pullback da Sup ↓';
+            else if (pullbackFromBot) bbStatus = 'Pullback da Inf ↑';
+            else if (nearUpper) bbStatus = 'Dentro — Próx. Sup';
+            else if (nearLower) bbStatus = 'Dentro — Próx. Inf';
+            else bbStatus = 'Dentro das Bandas';
+
+            const longRSI = lastRsi < RSI_MIN;
+            const shortRSI = lastRsi > RSI_MAX;
+
+            if (!longRSI && !shortRSI) {
+                return {
+                    isLong: null, price, rsi: lastRsi, stochK: lastStochK,
+                    bbLabel: bbStatus, candle: pat, score: 0,
+                    reason: `RSI neutro (${lastRsi.toFixed(1)}) | ${bbStatus}`
                 };
-                const isLong = scoreSignal(true, indicators) >= MIN_SCORE;
-                const isShort = scoreSignal(false, indicators) >= MIN_SCORE;
-                if (isLong || isShort) {
-                    const op = isShort ? "SHORT (VENDA)" : "LONG (COMPRA)";
-                    const { profit, partialProfit, entryValue } = calculateEstimatedProfit(isShort);
-                    const trailingStopText = ENTRY_PROFILE.trailingStop ? "\n🔄 Trailing Stop: Ativado" : "";
-                    const msg = `
-📢 ENTRADA CONFIRMADA - ${symbol} (4H) 📢
-Análise: ${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}
-🔹 Operação: ${op}
-🔹 Ativo: ${symbol}
-🔹 Entrada: ~${currentPrice.toFixed(5)}
-🔹 Valor de Entrada: $${entryValue.toFixed(2)}
-🔹 Alavancagem: ${ENTRY_PROFILE.leverage}
-🔹 Gerenciamento: ${ENTRY_PROFILE.positionSize}
-🎯 Take Profit Parcial: ${isShort ? ENTRY_PROFILE.shortPartialTP : ENTRY_PROFILE.longPartialTP}
-🎯 Take Profit Final: ${isShort ? ENTRY_PROFILE.shortTP : ENTRY_PROFILE.longTP}
-🛡️ Stop Loss: ${isShort ? ENTRY_PROFILE.shortSL : ENTRY_PROFILE.longSL}
-${trailingStopText}
-💰 Ganho Estimado (Parcial): $${partialProfit}
-💰 Ganho Estimado: $${profit}
-#TradeSignal #Bybit
-                    `;
-                    await sendTelegramMessage(msg);
-                    log(`🚀 Sinal ${op} enviado para ${symbol}!`);
-                    lastSignalTimestamps[symbol] = currentCandleTimestamp;
-                } else {
-                    log(`⏳ Nenhuma entrada clara para ${symbol}. Pontuação insuficiente.`);
-                }
-            } catch (error) {
-                log(`❌ Erro ao verificar ${symbol}: ${error.message}`);
             }
+
+            let auxScore = 0;
+            let bbLabel = bbStatus;
+
+            if (longRSI) {
+                if (belowLower) { auxScore++; bbLabel = 'Fora — Abaixo da Inf ✓'; }
+                if (pullbackFromBot) { auxScore += 2; bbLabel = 'Pullback da Inf ✓✓'; }
+                if (nearLower) { auxScore++; }
+
+                if (lastStochK < STOCH_MIN) auxScore++;
+
+                if (['Engolfo Alta', 'Martelo'].includes(pat)) auxScore++;
+            }
+
+            if (shortRSI) {
+                if (aboveUpper) { auxScore++; bbLabel = 'Fora — Acima da Sup ✓'; }
+                if (pullbackFromTop) { auxScore += 2; bbLabel = 'Pullback da Sup ✓✓'; }
+                if (nearUpper) { auxScore++; }
+
+                if (lastStochK > STOCH_MAX) auxScore++;
+
+                if (['Engolfo Baixa', 'Estrela Cadente'].includes(pat)) auxScore++;
+            }
+
+            if (auxScore >= MIN_AUX) {
+                return {
+                    isLong: longRSI, price, rsi: lastRsi, stochK: lastStochK,
+                    bbLabel, candle: pat, score: auxScore
+                };
+            }
+
+            const rsiDir = longRSI ? `Sobrevendido (${lastRsi.toFixed(1)})` : `Sobrecomprado (${lastRsi.toFixed(1)})`;
+            return {
+                isLong: null, price, rsi: lastRsi, stochK: lastStochK,
+                bbLabel, candle: pat, score: auxScore,
+                reason: `RSI ${rsiDir} — aguardando confirmação BB/Stoch`
+            };
         }
 
-        async function checkAllSignals() {
-            const assets = ['DOGEUSDT', 'ETHUSDT', 'BTCUSDT', 'BNBUSDT', 'XRPUSDT'];
-            for (const symbol of assets) {
-                await checkSignal(symbol);
+        async function checkSignal() {
+            if (!isRunning) return;
+            try {
+                log(`🔍 Verificando ${SYMBOL}...`);
+                const candles = await fetchKlineData(SYMBOL, INTERVAL, 200);
+                if (candles.length < BB_PERIOD + 10) {
+                    log('❌ Dados insuficientes.'); return;
+                }
+
+                const currentTs = candles[candles.length - 1].time;
+                if (lastSignalTimestamp === currentTs) {
+                    log('⏳ Sinal já processado neste candle.'); return;
+                }
+
+                const result = analyzeSignal(candles);
+                if (!result) return;
+
+                const bbInfo = result.bbLabel || '—';
+                const rsiTag = result.rsi < RSI_MIN ? '🔵 SV' : result.rsi > RSI_MAX ? '🔴 SC' : '⚪';
+                log(`📊 Preço: ${result.price.toFixed(6)} | RSI: ${result.rsi.toFixed(2)} ${rsiTag} | Stoch %K: ${result.stochK.toFixed(2)} | BB: ${bbInfo} | Candle: ${result.candle || '—'} | Aux: ${result.score}`);
+
+                if (result.isLong === true || result.isLong === false) {
+                    const dir = result.isLong ? 'LONG 🟢' : 'SHORT 🔴';
+                    log(`🚀 ENTRADA ${dir} detectada! (RSI + ${result.score} aux)`);
+                    showSignalCard(result.isLong, result.price, result.rsi, result.stochK, result.bbLabel, result.candle);
+                    playAlert(result.isLong);
+                    lastSignalTimestamp = currentTs;
+
+                    showAiLoading();
+                    askGemini(result.isLong, result.price, result.rsi, result.stochK, result.bbLabel, result.candle, result.score)
+                        .then(text => {
+                            showAiResult(text);
+                            log(`🤖 Gemini: ${text.replace(/\n/g, ' ')}`);
+                        })
+                        .catch(err => {
+                            showAiResult(`Erro ao consultar IA: ${err.message}`);
+                            log(`⚠️ Gemini erro: ${err.message}`);
+                        });
+                } else {
+                    hideSignalCard();
+                    hideAiAnalysis();
+                    const reason = result.reason || 'RSI neutro';
+                    log(`⏳ ${reason}`);
+                }
+            } catch (err) {
+                log(`❌ Erro: ${err.message}`);
             }
         }
 
         function startBot() {
-            if (isRunning) {
-                log('⚠️ Bot já está rodando.');
-                showSnackbar('Bot já está ativo!');
-                return;
-            }
+            if (isRunning) { showSnackbar('Bot já está ativo!'); return; }
             isRunning = true;
-            updateStatus('🟢 Ativo: Monitoramento iniciado');
-            log('▶️ Bot iniciado! Verificando a cada 10 minutos.');
-            checkAllSignals();
-            botInterval = setInterval(checkAllSignals, checkInterval);
-            showSnackbar('Bot iniciado com sucesso!');
+            updateStatus('🟢 Ativo — verificando a cada 5 min');
+            log('▶️ Bot iniciado! Verificando DOGEUSDT a cada 5 minutos.');
+            checkSignal();
+            botInterval = setInterval(checkSignal, checkInterval);
+            showSnackbar('Bot iniciado!');
         }
 
         function stopBot() {
-            if (!isRunning) {
-                log('⚠️ Bot já está parado.');
-                showSnackbar('Bot já está inativo!');
-                return;
-            }
+            if (!isRunning) { showSnackbar('Bot já está inativo!'); return; }
             isRunning = false;
             clearInterval(botInterval);
             botInterval = null;
-            lastSignalTimestamps = {};
+            lastSignalTimestamp = null;
+            hideSignalCard();
             updateStatus('🔴 Parado');
-            log('⏹️ Bot parado! Memória de sinais limpa.');
-            showSnackbar('Bot parado com sucesso!');
+            log('⏹️ Bot parado.');
+            showSnackbar('Bot parado!');
         }
 
         function checkNow() {
-            if (!isRunning) {
-                log('⚠️ Inicie o bot primeiro!');
-                showSnackbar('Inicie o bot antes de verificar.');
-                return;
-            }
-            log('Forçando verificação imediata...');
-            checkAllSignals();
-            showSnackbar('Verificação forçada iniciada!');
+            if (!isRunning) { showSnackbar('Inicie o bot primeiro.'); return; }
+            log('🔄 Forçando verificação...');
+            lastSignalTimestamp = null;
+            checkSignal();
         }
 
         document.addEventListener('DOMContentLoaded', () => {
             updateStatus('✅ Pronto para iniciar!');
-            log('🤖 Bot v4.0 carregado e pronto!');
-            showSnackbar('Bot inicializado com sucesso!');
+            log('🐶 DogeBot carregado. Estratégia: RSI(14) pullback (<35 long | >65 short) + BB(20,2) + Stoch(14,3,3) como auxiliares');
         });
     </script>
 </body>
