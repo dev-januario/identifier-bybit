@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DogeBot Bybit</title>
+    <title>Doge - Bot - Bybit</title>
     <style>
         body {
             font-family: 'Inter', -apple-system, sans-serif;
@@ -271,34 +271,10 @@
             letter-spacing: 0.5px;
         }
 
-        #ai-analysis {
-            display: none;
-            margin-top: 16px;
-            background: rgba(100, 90, 200, 0.08);
-            border: 1px solid #5B4FCF;
-            border-radius: 10px;
-            padding: 14px 16px;
-        }
-
-        #ai-analysis .ai-header {
-            font-size: 12px;
-            color: #9B8FE8;
-            text-transform: uppercase;
-            letter-spacing: 0.8px;
-            margin-bottom: 8px;
-            font-weight: 600;
-        }
-
-        #ai-analysis .ai-text {
-            font-size: 14px;
-            color: #DDD9FF;
-            line-height: 1.6;
-            white-space: pre-wrap;
-        }
-
-        #ai-analysis.loading .ai-text {
-            color: #6E7681;
-            font-style: italic;
+        button:disabled {
+            opacity: 0.35;
+            cursor: not-allowed;
+            transform: none;
         }
 
         @media (max-width: 600px) {
@@ -350,10 +326,6 @@
                 <div class="signal-item"><span>Banda (BB)</span><strong id="sig-bb">—</strong></div>
                 <div class="signal-item"><span>Candle</span><strong id="sig-candle">—</strong></div>
             </div>
-            <div id="ai-analysis">
-                <div class="ai-header">🤖 Análise Gemini</div>
-                <div class="ai-text" id="ai-text">Aguardando...</div>
-            </div>
         </div>
 
         <div>
@@ -363,11 +335,11 @@
                     <label for="bankValue">Valor da Banca (USD):</label>
                     <input type="number" id="bankValue" min="1" placeholder="Ex.: 200" />
                 </div>
-                <button class="tooltip" onclick="startBot()">
+                <button id="start-btn" class="tooltip" onclick="startBot()">
                     Iniciar Bot
                     <span class="tooltiptext">Inicia o monitoramento automático a cada 5 min</span>
                 </button>
-                <button class="stop-btn tooltip" onclick="stopBot()">
+                <button id="stop-btn" class="stop-btn tooltip" onclick="stopBot()" disabled>
                     Parar Bot
                     <span class="tooltiptext">Interrompe o monitoramento</span>
                 </button>
@@ -405,18 +377,14 @@
         const LONG_SL_PCT = 1.0;
         const SHORT_TP_PCT = 2.0;
         const SHORT_SL_PCT = 1.0;
-        const MIN_AUX = 1;
         const checkInterval = 5 * 60 * 1000;
         const apiKlineUrl = "https://api.bybit.com/v5/market/kline";
 
         // Telegram
-        const TELEGRAM_TOKEN   = '8609281623:AAFCFuUFHLteSLgydv3YYmocm7Fil5GRgjo';
+        const TELEGRAM_TOKEN = '8609281623:AAFCFuUFHLteSLgydv3YYmocm7Fil5GRgjo';
         const TELEGRAM_CHAT_ID = '@bybit_alertas_canal';
-        const TELEGRAM_URL     = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`;
+        const TELEGRAM_URL = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`;
 
-        // Gemini AI
-        const GEMINI_API_KEY = 'AIzaSyAZbBNVlXCY8MvdWEcGaQUXzOcOxK9iuGU';
-        const GEMINI_URL     = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
 
         let botInterval = null;
         let isRunning = false;
@@ -457,13 +425,13 @@
         }
 
         function buildTelegramMsg(isLong, price, rsiVal, stochVal, bbStatus, candlePat, bankValue) {
-            const dir       = isLong ? '🟢 LONG (COMPRA)' : '🔴 SHORT (VENDA)';
-            const entrada   = bankValue * (POSITION_SIZE / 100);
-            const tpPct     = isLong ? LONG_TP_PCT  : SHORT_TP_PCT;
-            const slPct     = isLong ? LONG_SL_PCT  : SHORT_SL_PCT;
-            const tpPrice   = isLong ? price * (1 + tpPct / 100) : price * (1 - tpPct / 100);
-            const slPrice   = isLong ? price * (1 - slPct / 100) : price * (1 + slPct / 100);
-            const now       = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+            const dir = isLong ? '🟢 LONG (COMPRA)' : '🔴 SHORT (VENDA)';
+            const entrada = bankValue * (POSITION_SIZE / 100);
+            const tpPct = isLong ? LONG_TP_PCT : SHORT_TP_PCT;
+            const slPct = isLong ? LONG_SL_PCT : SHORT_SL_PCT;
+            const tpPrice = isLong ? price * (1 + tpPct / 100) : price * (1 - tpPct / 100);
+            const slPrice = isLong ? price * (1 - slPct / 100) : price * (1 + slPct / 100);
+            const now = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
 
             return `🚨 <b>ENTRADA DETECTADA — DOGEUSDT (15M)</b>
 
@@ -483,75 +451,6 @@ ${dir}
 • Candle: ${candlePat || 'Nenhum'}
 
 #DOGE #Bybit #Pullback`;
-        }
-
-        // ── Gemini AI ────────────────────────────────────────────────────────────
-        async function askGemini(direction, price, rsiVal, stochVal, bbStatus, candlePat, auxScore) {
-            const dir = direction ? 'LONG (compra)' : 'SHORT (venda)';
-            const prompt = `Você é um assistente de trading técnico especializado em criptomoedas. Forneça uma análise objetiva com base nos dados abaixo, seguindo exatamente a estrutura solicitada.
-
-**Contexto da estratégia (Pullback em DOGEUSDT)**
-- Timeframe: 15 minutos (Bybit, futuros)
-- Gatilhos de entrada:
-  - **Compra**: RSI(14) < 35 **e** Estocástico %K(14,3,3) < 20, com preço próximo/abaixo da Banda de Bollinger inferior
-  - **Venda**: RSI(14) > 65 **e** Estocástico %K > 80, com preço próximo/acima da Banda de Bollinger superior
-- Filtros auxiliares: Padrão de candle de reversão e Pontuação auxiliar (0-100) reforçam o sinal.
-
-**Dados atuais do candle**
-- Direção da entrada sugerida: ${dir}   // "COMPRA" ou "VENDA"
-- Preço atual: ${price.toFixed(6)} USDT
-- RSI(14): ${rsiVal.toFixed(2)}
-- Estocástico %K: ${stochVal.toFixed(2)}
-- Posição nas Bandas de Bollinger: ${bbStatus}   // ex.: "tocou banda inferior", "banda superior", "entre as bandas"
-- Padrão de candle detectado: ${candlePat || 'Nenhum'}
-- Pontuação auxiliar (0-100): ${auxScore}   // consolida múltiplos fatores técnicos
-
-**Tarefa** (responda em português, máximo 5 frases, com o formato exato abaixo):
-
-1. **Ação**: [COMPRAR / VENDER / AGUARDAR]
-2. **Confiança**: [BAIXA / MÉDIA / ALTA]
-3. **Justificativa**: (1-2 frases mencionando a confluência ou divergência dos indicadores, e se o padrão de candle e a pontuação auxiliar reforçam ou enfraquecem o sinal)
-4. **Riscos**: (1 frase com o principal ponto de atenção, ex.: divergência de volume, resistência próxima, estocástico ainda caindo)
-5. **Gestão sugerida**: Stop loss em [valor] USDT (método: abaixo/ acima da mínima/máxima do candle de sinal ou da banda) | Take profit parcial em [valor] USDT (ex.: banda oposta ou resistência/suporte).
-
-Exemplo de resposta esperada (com dados hipotéticos):
-1. Ação: COMPRAR
-2. Confiança: MÉDIA
-3. Justificativa: RSI sobrevendido e martelo na banda inferior, com estocástico virando e pontuação auxiliar alta (75). O contexto de tendência ainda é baixista, o que reduz a confiança.
-4. Riscos: Forte pressão vendedora pode romper a banda inferior sem reação.
-5. Gestão sugerida: Stop loss em 0.1548 USDT (abaixo do martelo) | Take profit parcial em 0.1630 USDT (banda do meio).`;
-
-            const body = {
-                contents: [{ parts: [{ text: prompt }] }],
-                generationConfig: { maxOutputTokens: 300, temperature: 0.3 }
-            };
-
-            const res = await fetch(GEMINI_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body)
-            });
-
-            if (!res.ok) throw new Error(`Gemini HTTP ${res.status}`);
-            const json = await res.json();
-            return json.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || 'Sem resposta da IA.';
-        }
-
-        function showAiLoading() {
-            const box = document.getElementById('ai-analysis');
-            box.style.display = 'block';
-            box.classList.add('loading');
-            document.getElementById('ai-text').textContent = 'Consultando Gemini...';
-        }
-
-        function showAiResult(text) {
-            const box = document.getElementById('ai-analysis');
-            box.classList.remove('loading');
-            document.getElementById('ai-text').textContent = text;
-        }
-
-        function hideAiAnalysis() {
-            document.getElementById('ai-analysis').style.display = 'none';
         }
 
         function playAlert(isLong) {
@@ -717,87 +616,85 @@ Exemplo de resposta esperada (com dados hipotéticos):
         function analyzeSignal(candles) {
             if (candles.length < BB_PERIOD + 10) return null;
 
-            const closes = candles.map(c => c.close);
-            const highs = candles.map(c => c.high);
-            const lows = candles.map(c => c.low);
-            const price = closes[closes.length - 1];
+            const closes   = candles.map(c => c.close);
+            const highs    = candles.map(c => c.high);
+            const lows     = candles.map(c => c.low);
+            const price    = closes[closes.length - 1];
             const prevClose = closes[closes.length - 2];
 
-            const bb = bollingerBands(closes, BB_PERIOD, BB_STD);
+            const bb     = bollingerBands(closes, BB_PERIOD, BB_STD);
             const rsiArr = rsi(closes, RSI_PERIOD);
-            const stoch = stochastic(highs, lows, closes, STOCH_K, STOCH_SLOW_K, STOCH_D);
-            const pat = candlePattern(candles);
+            const stoch  = stochastic(highs, lows, closes, STOCH_K, STOCH_SLOW_K, STOCH_D);
+            const pat    = candlePattern(candles);
 
-            const lastRsi = rsiArr[rsiArr.length - 1];
+            const lastRsi    = rsiArr[rsiArr.length - 1];
             const lastStochK = stoch.k[stoch.k.length - 1];
-            const lastUpper = bb.upper[bb.upper.length - 1];
-            const lastLower = bb.lower[bb.lower.length - 1];
-            const prevUpper = bb.upper[bb.upper.length - 2];
-            const prevLower = bb.lower[bb.lower.length - 2];
-            const lastMiddle = bb.middle[bb.middle.length - 1];
-            const aboveUpper = price >= lastUpper;
-            const belowLower = price <= lastLower;
+            const prevStochK = stoch.k[stoch.k.length - 2];
+            const lastStochD = stoch.d[stoch.d.length - 1];
+            const prevStochD = stoch.d[stoch.d.length - 2];
+
+            const lastUpper  = bb.upper[bb.upper.length - 1];
+            const lastLower  = bb.lower[bb.lower.length - 1];
+            const prevUpper  = bb.upper[bb.upper.length - 2];
+            const prevLower  = bb.lower[bb.lower.length - 2];
+
+            // ── Posição do preço em relação às bandas ─────────────────────
+            const aboveUpper      = price >= lastUpper;
+            const belowLower      = price <= lastLower;
             const pullbackFromTop = prevClose >= prevUpper && price < lastUpper;
             const pullbackFromBot = prevClose <= prevLower && price > lastLower;
-            const nearUpper = price > lastMiddle && price < lastUpper;
-            const nearLower = price < lastMiddle && price > lastLower;
 
             let bbStatus;
-            if (aboveUpper) bbStatus = 'Fora — Acima da Sup';
-            else if (belowLower) bbStatus = 'Fora — Abaixo da Inf';
+            if (aboveUpper)           bbStatus = 'Fora — Acima da Sup';
+            else if (belowLower)      bbStatus = 'Fora — Abaixo da Inf';
             else if (pullbackFromTop) bbStatus = 'Pullback da Sup ↓';
             else if (pullbackFromBot) bbStatus = 'Pullback da Inf ↑';
-            else if (nearUpper) bbStatus = 'Dentro — Próx. Sup';
-            else if (nearLower) bbStatus = 'Dentro — Próx. Inf';
-            else bbStatus = 'Dentro das Bandas';
+            else                      bbStatus = 'Dentro das Bandas';
 
-            const longRSI = lastRsi < RSI_MIN;
+            // ── Gate 1: RSI ───────────────────────────────────────────────
+            const longRSI  = lastRsi < RSI_MIN;
             const shortRSI = lastRsi > RSI_MAX;
 
             if (!longRSI && !shortRSI) {
-                return {
-                    isLong: null, price, rsi: lastRsi, stochK: lastStochK,
-                    bbLabel: bbStatus, candle: pat, score: 0,
-                    reason: `RSI neutro (${lastRsi.toFixed(1)}) | ${bbStatus}`
-                };
+                return { isLong: null, price, rsi: lastRsi, stochK: lastStochK,
+                    bbLabel: bbStatus, candle: pat,
+                    reason: `RSI neutro (${lastRsi.toFixed(1)}) | ${bbStatus}` };
             }
 
-            let auxScore = 0;
-            let bbLabel = bbStatus;
+            // ── Gate 2: BB — preço FORA da banda (ou pullback de volta) ───
+            const bbBreakLong  = belowLower || pullbackFromBot;
+            const bbBreakShort = aboveUpper || pullbackFromTop;
 
-            if (longRSI) {
-                if (belowLower) { auxScore++; bbLabel = 'Fora — Abaixo da Inf ✓'; }
-                if (pullbackFromBot) { auxScore += 2; bbLabel = 'Pullback da Inf ✓✓'; }
-                if (nearLower) { auxScore++; }
+            // ── Gate 3: Estocástico — cruzamento K/D na direção certa ─────
+            // LONG:  K cruzou D para cima  (reversão de baixa)
+            // SHORT: K cruzou D para baixo (reversão de alta)
+            const stochCrossUp   = prevStochK <= prevStochD && lastStochK > lastStochD;
+            const stochCrossDown = prevStochK >= prevStochD && lastStochK < lastStochD;
 
-                if (lastStochK < STOCH_MIN) auxScore++;
-
-                if (['Engolfo Alta', 'Martelo'].includes(pat)) auxScore++;
+            // ── Sinal confirmado: todos os 3 gates atendidos ──────────────
+            if (longRSI && bbBreakLong && stochCrossUp) {
+                const bbLabel = belowLower ? 'Fora — Abaixo da Inf ✓' : 'Pullback da Inf ✓';
+                return { isLong: true, price, rsi: lastRsi, stochK: lastStochK,
+                    bbLabel, candle: pat };
             }
 
-            if (shortRSI) {
-                if (aboveUpper) { auxScore++; bbLabel = 'Fora — Acima da Sup ✓'; }
-                if (pullbackFromTop) { auxScore += 2; bbLabel = 'Pullback da Sup ✓✓'; }
-                if (nearUpper) { auxScore++; }
-
-                if (lastStochK > STOCH_MAX) auxScore++;
-
-                if (['Engolfo Baixa', 'Estrela Cadente'].includes(pat)) auxScore++;
+            if (shortRSI && bbBreakShort && stochCrossDown) {
+                const bbLabel = aboveUpper ? 'Fora — Acima da Sup ✓' : 'Pullback da Sup ✓';
+                return { isLong: false, price, rsi: lastRsi, stochK: lastStochK,
+                    bbLabel, candle: pat };
             }
 
-            if (auxScore >= MIN_AUX) {
-                return {
-                    isLong: longRSI, price, rsi: lastRsi, stochK: lastStochK,
-                    bbLabel, candle: pat, score: auxScore
-                };
-            }
-
+            // ── Sinal parcial: informa o que está faltando ────────────────
             const rsiDir = longRSI ? `Sobrevendido (${lastRsi.toFixed(1)})` : `Sobrecomprado (${lastRsi.toFixed(1)})`;
-            return {
-                isLong: null, price, rsi: lastRsi, stochK: lastStochK,
-                bbLabel, candle: pat, score: auxScore,
-                reason: `RSI ${rsiDir} — aguardando confirmação BB/Stoch`
-            };
+            const bbOk   = longRSI ? bbBreakLong  : bbBreakShort;
+            const stOk   = longRSI ? stochCrossUp : stochCrossDown;
+            let pending  = [];
+            if (!bbOk) pending.push('rompimento da banda');
+            if (!stOk) pending.push('cruzamento K/D do Stoch');
+
+            return { isLong: null, price, rsi: lastRsi, stochK: lastStochK,
+                bbLabel: bbStatus, candle: pat,
+                reason: `RSI ${rsiDir} — aguardando: ${pending.join(' e ')}` };
         }
 
         async function checkSignal() {
@@ -823,35 +720,19 @@ Exemplo de resposta esperada (com dados hipotéticos):
 
                 if (result.isLong === true || result.isLong === false) {
                     const dir = result.isLong ? 'LONG 🟢' : 'SHORT 🔴';
-                    log(`🚀 ENTRADA ${dir} detectada! (RSI + ${result.score} aux)`);
+                    log(`🚀 ENTRADA ${dir} detectada! (RSI + BB + Stoch K/D)`);
                     showSignalCard(result.isLong, result.price, result.rsi, result.stochK, result.bbLabel, result.candle);
                     playAlert(result.isLong);
                     lastSignalTimestamp = currentTs;
 
-                    // Envia para o Telegram
                     const bankInput = document.getElementById('bankValue').value;
                     const bank = (bankInput && Number(bankInput) > 0) ? Number(bankInput) : 100;
                     const tgMsg = buildTelegramMsg(result.isLong, result.price, result.rsi, result.stochK, result.bbLabel, result.candle, bank);
                     sendTelegram(tgMsg)
                         .then(() => log('📬 Sinal enviado para o Telegram!'))
                         .catch(err => log(`⚠️ Telegram erro: ${err.message}`));
-
-                    // Consulta Gemini e envia resultado também no Telegram
-                    showAiLoading();
-                    askGemini(result.isLong, result.price, result.rsi, result.stochK, result.bbLabel, result.candle, result.score)
-                        .then(text => {
-                            showAiResult(text);
-                            log(`🤖 Gemini: ${text.replace(/\n/g, ' ')}`);
-                            sendTelegram(`🤖 <b>Análise Gemini</b>\n\n${text}`)
-                                .catch(err => log(`⚠️ Telegram (Gemini) erro: ${err.message}`));
-                        })
-                        .catch(err => {
-                            showAiResult(`Erro ao consultar IA: ${err.message}`);
-                            log(`⚠️ Gemini erro: ${err.message}`);
-                        });
                 } else {
                     hideSignalCard();
-                    hideAiAnalysis();
                     const reason = result.reason || 'RSI neutro';
                     log(`⏳ ${reason}`);
                 }
@@ -860,9 +741,14 @@ Exemplo de resposta esperada (com dados hipotéticos):
             }
         }
 
+        function setBtnState(running) {
+            document.getElementById('start-btn').disabled = running;
+            document.getElementById('stop-btn').disabled  = !running;
+        }
+
         function startBot() {
-            if (isRunning) { showSnackbar('Bot já está ativo!'); return; }
             isRunning = true;
+            setBtnState(true);
             updateStatus('🟢 Ativo — verificando a cada 5 min');
             log('▶️ Bot iniciado! Verificando DOGEUSDT a cada 5 minutos.');
             checkSignal();
@@ -871,11 +757,11 @@ Exemplo de resposta esperada (com dados hipotéticos):
         }
 
         function stopBot() {
-            if (!isRunning) { showSnackbar('Bot já está inativo!'); return; }
             isRunning = false;
             clearInterval(botInterval);
             botInterval = null;
             lastSignalTimestamp = null;
+            setBtnState(false);
             hideSignalCard();
             updateStatus('🔴 Parado');
             log('⏹️ Bot parado.');
@@ -890,8 +776,9 @@ Exemplo de resposta esperada (com dados hipotéticos):
         }
 
         document.addEventListener('DOMContentLoaded', () => {
+            setBtnState(false);
             updateStatus('✅ Pronto para iniciar!');
-            log('🐶 DogeBot carregado. Estratégia: RSI(14) pullback (<35 long | >65 short) + BB(20,2) + Stoch(14,3,3) como auxiliares');
+            log('🐶 DogeBot carregado. Estratégia: RSI(14) + rompimento BB(20,2) + cruzamento K/D Stoch(14,3,3)');
         });
     </script>
 </body>
