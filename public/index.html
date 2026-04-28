@@ -409,6 +409,11 @@
         const checkInterval = 5 * 60 * 1000;
         const apiKlineUrl = "https://api.bybit.com/v5/market/kline";
 
+        // Telegram
+        const TELEGRAM_TOKEN   = '8609281623:AAFCFuUFHLteSLgydv3YYmocm7Fil5GRgjo';
+        const TELEGRAM_CHAT_ID = '@bybit_alertas_canal';
+        const TELEGRAM_URL     = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`;
+
         let botInterval = null;
         let isRunning = false;
         let lastSignalTimestamp = null;
@@ -436,6 +441,47 @@
             setTimeout(() => { sb.className = 'snackbar'; }, 3000);
         }
 
+        // ── Telegram ────────────────────────────────────────────────────────────
+        async function sendTelegram(text) {
+            const res = await fetch(TELEGRAM_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ chat_id: TELEGRAM_CHAT_ID, text, parse_mode: 'HTML' })
+            });
+            if (!res.ok) throw new Error(`Telegram HTTP ${res.status}: ${await res.text()}`);
+            return res.json();
+        }
+
+        function buildTelegramMsg(isLong, price, rsiVal, stochVal, bbStatus, candlePat, bankValue) {
+            const dir       = isLong ? '🟢 LONG (COMPRA)' : '🔴 SHORT (VENDA)';
+            const entrada   = bankValue * (POSITION_SIZE / 100);
+            const tpPct     = isLong ? LONG_TP_PCT  : SHORT_TP_PCT;
+            const slPct     = isLong ? LONG_SL_PCT  : SHORT_SL_PCT;
+            const tpPrice   = isLong ? price * (1 + tpPct / 100) : price * (1 - tpPct / 100);
+            const slPrice   = isLong ? price * (1 - slPct / 100) : price * (1 + slPct / 100);
+            const now       = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+
+            return `🚨 <b>ENTRADA DETECTADA — DOGEUSDT (15M)</b>
+
+${dir}
+📅 ${now}
+
+💵 <b>Entrada:</b> ${price.toFixed(6)} USDT
+🎯 <b>TP:</b> ${tpPrice.toFixed(6)} USDT (+${tpPct}%)
+🛡 <b>SL:</b> ${slPrice.toFixed(6)} USDT (-${slPct}%)
+💰 <b>Banca:</b> ${POSITION_SIZE}% ($${entrada.toFixed(2)})
+⚖️ <b>Alavancagem sugerida:</b> até ${MAX_LEVERAGE}x
+
+📊 <b>Indicadores</b>
+• RSI(14): ${rsiVal.toFixed(2)}
+• Stoch %K: ${stochVal.toFixed(2)}
+• BB: ${bbStatus}
+• Candle: ${candlePat || 'Nenhum'}
+
+#DOGE #Bybit #Pullback`;
+        }
+
+        // ── Gemini AI ────────────────────────────────────────────────────────────
         async function askGemini(direction, price, rsiVal, stochVal, bbStatus, candlePat, auxScore) {
             const dir = direction ? 'LONG (compra)' : 'SHORT (venda)';
             const prompt = `Você é um assistente de trading técnico especializado em criptomoedas. Forneça uma análise objetiva com base nos dados abaixo, seguindo exatamente a estrutura solicitada.
@@ -778,11 +824,22 @@ Exemplo de resposta esperada (com dados hipotéticos):
                     playAlert(result.isLong);
                     lastSignalTimestamp = currentTs;
 
+                    // Envia para o Telegram
+                    const bankInput = document.getElementById('bankValue').value;
+                    const bank = (bankInput && Number(bankInput) > 0) ? Number(bankInput) : 100;
+                    const tgMsg = buildTelegramMsg(result.isLong, result.price, result.rsi, result.stochK, result.bbLabel, result.candle, bank);
+                    sendTelegram(tgMsg)
+                        .then(() => log('📬 Sinal enviado para o Telegram!'))
+                        .catch(err => log(`⚠️ Telegram erro: ${err.message}`));
+
+                    // Consulta Gemini e envia resultado também no Telegram
                     showAiLoading();
                     askGemini(result.isLong, result.price, result.rsi, result.stochK, result.bbLabel, result.candle, result.score)
                         .then(text => {
                             showAiResult(text);
                             log(`🤖 Gemini: ${text.replace(/\n/g, ' ')}`);
+                            sendTelegram(`🤖 <b>Análise Gemini</b>\n\n${text}`)
+                                .catch(err => log(`⚠️ Telegram (Gemini) erro: ${err.message}`));
                         })
                         .catch(err => {
                             showAiResult(`Erro ao consultar IA: ${err.message}`);
