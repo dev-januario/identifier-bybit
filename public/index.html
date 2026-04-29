@@ -822,6 +822,7 @@ ${dir}
                         log(`🚀 ${symbol} — ${dir} | SMC Pullback | ${trendLbl} | ${setupLbl} | Retração ${result.retracePct}%${bonusLbl} | TP: ${result.tpPrice.toFixed(6)} | SL: ${result.slPrice.toFixed(6)}`);
                         showSignalCard(result.isLong, symbol, result.price, result.rsi, result.tpPrice, result.slPrice, result.candle);
                         playAlert(result.isLong);
+                        window.open(`https://www.bybit.com/trade/usdt/${symbol}`, '_blank');
                         lastSignalTimestamps[symbol] = currentTs;
                         found++;
 
