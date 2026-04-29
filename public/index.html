@@ -363,8 +363,7 @@
         const BB_PERIOD = 20;            // Bollinger Bands — também define TP/SL
         const BB_STD = 2;
         const RSI_PERIOD = 14;
-        const RSI_OVERSOLD = 35;         // IFR ≤ 35 → condição de LONG (sobrevendido)
-        const RSI_OVERBOUGHT = 65;       // IFR ≥ 65 → condição de SHORT (sobrecomprado)
+        const EMA_FILTER_PERIOD = 21;    // EMA21 — filtro secundário de tendência
         const MAX_LEVERAGE = 15;
         const POSITION_SIZE = 50;
         const checkInterval = 15 * 60 * 1000; // verifica a cada 15 min (candle 1H)
@@ -419,31 +418,34 @@
             return res.json();
         }
 
-        function buildTelegramMsg(isLong, symbol, price, rsiVal, tpPrice, slPrice, candlePat, highVolume, bankValue) {
+        function buildTelegramMsg(isLong, symbol, price, rsiVal, tpPrice, slPrice, candlePat, rsiBonus, retracePct, bankValue) {
             const dir = isLong ? '🟢 LONG (COMPRA)' : '🔴 SHORT (VENDA)';
-            const setup = isLong ? 'Acumulação rompida' : 'Distribuição rompida';
-            const rsiLabel = isLong
-                ? `IFR(14) esteve sobrevendido → reagindo (${rsiVal.toFixed(1)})`
-                : `IFR(14) esteve sobrecomprado → caindo (${rsiVal.toFixed(1)})`;
-            const floorLbl = isLong ? 'Fundo respeitado ✅' : 'Topo respeitado ✅';
-            const volLbl = highVolume ? '🔥 Volume acima da média' : 'Volume normal';
-            const bbTpLabel = isLong ? 'Banda Superior BB(20)' : 'Banda Inferior BB(20)';
-            const bbSlLabel = isLong ? 'Banda Inferior BB(20)' : 'Banda Superior BB(20)';
+            const trendLbl = isLong ? '📈 Alta — HH/HL + preço acima da EMA21' : '📉 Baixa — LH/LL + preço abaixo da EMA21';
+            const setupLbl = isLong
+                ? 'Pullback em tendência de alta — Rompimento da retomada'
+                : 'Pullback em tendência de baixa — Continuação vendedora';
+            const rsiLbl = isLong
+                ? `IFR(14) em ganho de força (${rsiVal.toFixed(1)})`
+                : `IFR(14) em perda de força (${rsiVal.toFixed(1)})`;
+            const bonusLbl = rsiBonus ? '✅ IFR favorável' : '⚠️ IFR neutro';
+            const bbTpLabel = isLong ? 'BB Superior (20,2) / RR 2:1' : 'BB Inferior (20,2) / RR 2:1';
+            const bbSlLabel = isLong ? 'Fundo do pullback' : 'Topo do pullback';
             const entrada = bankValue * (POSITION_SIZE / 100);
             const tpPct = ((Math.abs(tpPrice - price) / price) * 100).toFixed(2);
             const slPct = ((Math.abs(slPrice - price) / price) * 100).toFixed(2);
             const now = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
             const ticker = symbol.replace('USDT', '');
 
-            return `🚨 <b>SINAL DETECTADO — ${symbol} (1H)</b>
+            return `🚨 <b>SMC PULLBACK — ${symbol} (1H)</b>
 
 ${dir}
 📅 ${now}
 
-📌 <b>Setup:</b> ${setup}
-📉 <b>RSI:</b> ${rsiLabel}
-🔲 <b>Estrutura:</b> ${floorLbl}
-📦 <b>Volume:</b> ${volLbl}
+📌 <b>Setup:</b> ${setupLbl}
+📊 <b>Tendência:</b> ${trendLbl}
+🔄 <b>Retração:</b> ${retracePct}% do impulso
+📉 <b>IFR(14):</b> ${rsiLbl}
+📊 <b>Bônus:</b> ${bonusLbl}
 
 💵 <b>Entrada:</b> ${price.toFixed(6)} USDT
 🎯 <b>TP:</b> ${tpPrice.toFixed(6)} USDT (+${tpPct}%) — ${bbTpLabel}
@@ -453,7 +455,7 @@ ${dir}
 
 📊 <b>Padrão de candle:</b> ${candlePat || 'Nenhum'}
 
-#Bybit #Sinal #${ticker}`;
+#Bybit #SMCPullback #${ticker}`;
         }
 
         function playAlert(isLong) {
@@ -490,8 +492,8 @@ ${dir}
                 isLong ? '🟢 LONG — Buscar Entrada de Compra' : '🔴 SHORT — Buscar Entrada de Venda';
             document.getElementById('sig-symbol').textContent = symbol;
             document.getElementById('sig-trend').textContent = isLong
-                ? '� Acumulação rompida'
-                : '🔴 Distribuição rompida';
+                ? '📈 SMC Pullback Alta'
+                : '📉 SMC Pullback Baixa';
             document.getElementById('sig-entry').textContent = price.toFixed(6);
             document.getElementById('sig-leverage').textContent = MAX_LEVERAGE + 'x';
             document.getElementById('sig-size').textContent = POSITION_SIZE + '%  ($' + entrada.toFixed(2) + ')';
@@ -573,100 +575,168 @@ ${dir}
             return null;
         }
 
-        // ── Análise principal: Acumulação / Distribuição + Rompimento ───────────────────
+        // ── Pontos de swing (HH / HL / LH / LL) ───────────────────────────────
+        // Swing high: máxima maior que 'lookback' vizinhos em cada lado.
+        // Swing low : mínima menor que 'lookback' vizinhos em cada lado.
+        // Os últimos 'lookback' candles não são considerados (ainda não confirmados).
+        function findSwings(highs, lows, lookback = 3) {
+            const swingHighs = [];
+            const swingLows = [];
+            const limit = highs.length - lookback;
+            for (let i = lookback; i < limit; i++) {
+                const leftH = highs.slice(i - lookback, i);
+                const rightH = highs.slice(i + 1, i + lookback + 1);
+                if (leftH.every(h => h <= highs[i]) && rightH.every(h => h <= highs[i])) {
+                    swingHighs.push({ index: i, price: highs[i] });
+                }
+                const leftL = lows.slice(i - lookback, i);
+                const rightL = lows.slice(i + 1, i + lookback + 1);
+                if (leftL.every(l => l >= lows[i]) && rightL.every(l => l >= lows[i])) {
+                    swingLows.push({ index: i, price: lows[i] });
+                }
+            }
+            return { swingHighs, swingLows };
+        }
+
+        // ── Análise principal: SMC Pullback ──────────────────────────────────
         //
         // SINAL LONG — todos devem ser verdadeiros:
-        //   1. RSI inteligente : RSI < 35 em algum dos últimos 5 candles E RSI subindo
-        //   2. Fundo segurando : últimos 4 candles não romperam a mínima de referência
-        //   3. Consolidação    : range médio dos últimos 5 candles < 65% da média de 20
-        //   4. Rompimento      : candle atual fecha acima da máxima dos 5 candles anteriores
-        //   Bônus              : volume atual > 120% da média dos últimos 20 candles
+        //   1. Tendência de alta : HH + HL nos swing points recentes | preço > EMA21
+        //   2. Impulso anterior  : último swing high mais recente que o último swing low
+        //   3. Pullback saudável: recuo de 30–65% do impulso sem romper a estrutura
+        //   4. Gatilho de entrada: fechamento acima da máxima do candle anterior
+        //   Bônus               : IFR em ganho de força
         //
         // SINAL SHORT — todos devem ser verdadeiros:
-        //   1. RSI inteligente : RSI > 65 em algum dos últimos 5 candles E RSI caindo
-        //   2. Topo segurando  : últimos 4 candles não romperam a máxima de referência
-        //   3. Consolidação    : range médio dos últimos 5 candles < 65% da média de 20
-        //   4. Rompimento      : candle atual fecha abaixo da mínima dos 5 candles anteriores
-        //   Bônus              : volume atual > 120% da média dos últimos 20 candles
+        //   1. Tendência de baixa: LH + LL nos swing points recentes | preço < EMA21
+        //   2. Impulso anterior  : último swing low mais recente que o último swing high
+        //   3. Pullback saudável: recuo de 30–65% do impulso sem romper a estrutura
+        //   4. Gatilho de entrada: fechamento abaixo da mínima do candle anterior
+        //   Bônus               : IFR em perda de força
         //
-        // TP/SL via Bollinger Bands(20,2) — usado apenas para alvos, não como gatilho:
-        //   LONG:  TP = banda superior | SL = banda inferior
-        //   SHORT: TP = banda inferior | SL = banda superior
+        // TP : Banda BB oposta (20,2) ou RR 2:1 — o que for mais distante do entry
+        // SL : Fundo/Topo do pullback
         function analyzeSignal(candles) {
-            const minLen = 40; // mínimo confortável para todos os cálculos
+            const minLen = 60;
             if (candles.length < minLen) return null;
 
             const closes = candles.map(c => c.close);
-            const highs = candles.map(c => c.high);
-            const lows = candles.map(c => c.low);
-            const volumes = candles.map(c => c.volume);
             const cur = candles[candles.length - 1]; // candle atual (fechado)
+            const prev = candles[candles.length - 2]; // candle anterior
 
-            // ── 1. IFR(14) inteligente ───────────────────────────────────────
-            const rsiArr = rsi(closes, RSI_PERIOD);
-            if (rsiArr.length < 6) return null;
-            const lastRsi = rsiArr[rsiArr.length - 1];
-            const prevRsi = rsiArr[rsiArr.length - 2];
-            const recent5Rsi = rsiArr.slice(-6, -1); // 5 valores antes do atual
-            const rsiWasOversold = recent5Rsi.some(r => r < RSI_OVERSOLD);   // esteve sobrevendido
-            const rsiWasOverbought = recent5Rsi.some(r => r > RSI_OVERBOUGHT); // esteve sobrecomprado
-            const rsiRising = lastRsi > prevRsi; // RSI subindo
-            const rsiFalling = lastRsi < prevRsi; // RSI caindo
+            // Janela de trabalho: últimos 60 candles para detecção de swings
+            const wCandles = candles.slice(-60);
+            const wHighs = wCandles.map(c => c.high);
+            const wLows = wCandles.map(c => c.low);
 
-            // ── 2. Fundo / Topo segurando ──────────────────────────────────
-            // Referência: janela de 10 candles anterior à janela de holding
-            const refLow = Math.min(...lows.slice(-15, -5));  // piso de referência
-            const refHigh = Math.max(...highs.slice(-15, -5)); // teto de referência
-            const holdLows = lows.slice(-5, -1);              // 4 candles antes do atual
-            const holdHighs = highs.slice(-5, -1);
-            const bottomHolding = holdLows.every(l => l >= refLow);   // fundo não cedeu
-            const topHolding = holdHighs.every(h => h <= refHigh); // topo não foi rompido
+            // ── Swing points ──
+            const { swingHighs, swingLows } = findSwings(wHighs, wLows, 3);
+            if (swingHighs.length < 2 || swingLows.length < 2) return null;
 
-            // ── 3. Consolidação (mercado comprimido) ──────────────────────────
-            const recentRanges = candles.slice(-6, -1).map(c => c.high - c.low);
-            const avgRecentRange = recentRanges.reduce((a, b) => a + b, 0) / recentRanges.length;
-            const longRanges = candles.slice(-21, -1).map(c => c.high - c.low);
-            const avgLongRange = longRanges.reduce((a, b) => a + b, 0) / longRanges.length;
-            const isConsolidating = avgRecentRange <= avgLongRange * 0.65; // 65% da média histórica
+            const lastSH = swingHighs[swingHighs.length - 1]; // swing high mais recente
+            const prev2SH = swingHighs[swingHighs.length - 2]; // swing high anterior
+            const lastSL = swingLows[swingLows.length - 1];   // swing low mais recente
+            const prev2SL = swingLows[swingLows.length - 2];   // swing low anterior
 
-            // ── 4. Rompimento (candle atual vs extremos da consolidação) ─────────
-            const prev5High = Math.max(...highs.slice(-6, -1));
-            const prev5Low = Math.min(...lows.slice(-6, -1));
-            const breakoutUp = cur.close > prev5High; // fecha acima da consolidação
-            const breakoutDown = cur.close < prev5Low;  // fecha abaixo da consolidação
+            // ── EMA21 (filtro secundário) ──
+            const ema21Arr = ema(closes, EMA_FILTER_PERIOD);
+            const lastEma21 = ema21Arr[ema21Arr.length - 1];
 
-            // ── 5. Volume bônus ──────────────────────────────────────────
-            const avgVol = volumes.slice(-21, -1).reduce((a, b) => a + b, 0) / 20;
-            const highVolume = cur.volume > avgVol * 1.2; // 20% acima da média
+            // ── Estrutura de mercado: HH/HL (alta) ou LH/LL (baixa) ──
+            const isHHHL = lastSH.price > prev2SH.price && lastSL.price > prev2SL.price;
+            const isLHLL = lastSH.price < prev2SH.price && lastSL.price < prev2SL.price;
 
-            // ── Bollinger Bands — apenas para TP/SL ─────────────────────────
+            const isUpTrend = isHHHL && cur.close > lastEma21;
+            const isDownTrend = isLHLL && cur.close < lastEma21;
+
+            // ── Indicadores auxiliares (TP/SL e bônus) ──
             const bb = bollingerBands(closes, BB_PERIOD, BB_STD);
             const bbUpper = bb.upper[bb.upper.length - 1];
             const bbLower = bb.lower[bb.lower.length - 1];
-
+            const rsiArr = rsi(closes, RSI_PERIOD);
+            const lastRsi = rsiArr[rsiArr.length - 1];
+            const prevRsi = rsiArr.length > 1 ? rsiArr[rsiArr.length - 2] : lastRsi;
             const pat = candlePattern(candles);
 
-            // ── SINAL LONG: acumulação rompida para cima ──────────────────
-            if (rsiWasOversold && rsiRising && bottomHolding && isConsolidating && breakoutUp) {
-                return {
-                    isLong: true, price: cur.close, rsi: lastRsi,
-                    tpPrice: bbUpper, slPrice: bbLower,
-                    candle: pat, highVolume
-                };
+            // ── SINAL LONG ───────────────────────────────────────────────
+            // Último impulso foi para cima: lastSH deve ser mais recente que lastSL
+            if (isUpTrend && lastSH.index > lastSL.index) {
+                const impulseLow = lastSL.price;
+                const impulseHigh = lastSH.price;
+                const impulseLeg = impulseHigh - impulseLow;
+                if (impulseLeg <= 0) return null;
+
+                // Candles do pullback: entre o swing high e o candle atual (exclusive)
+                const afterSH = wCandles.slice(lastSH.index + 1, -1);
+                if (afterSH.length < 1) return { isLong: null, rsi: lastRsi, reason: 'Aguardando pullback' };
+
+                const pullbackLow = Math.min(...afterSH.map(c => c.low));
+                const retrace = (impulseHigh - pullbackLow) / impulseLeg;
+                const inZone = retrace >= 0.30 && retrace <= 0.65;
+
+                // Estrutura preservada: pullback não cedeu o swing low (impulso intacto)
+                const structureOK = pullbackLow > impulseLow;
+
+                // Gatilho: fechamento acima da máxima do candle anterior
+                const breakout = cur.close > prev.high;
+
+                if (inZone && structureOK && breakout) {
+                    const slPrice = pullbackLow;
+                    const risk = cur.close - slPrice;
+                    if (risk <= 0) return null;
+                    const rrTP = cur.close + 2 * risk;                         // RR 2:1
+                    const tpPrice = bbUpper > cur.close ? Math.max(bbUpper, rrTP) : rrTP;
+
+                    return {
+                        isLong: true, price: cur.close, rsi: lastRsi,
+                        tpPrice, slPrice, candle: pat,
+                        rsiBonus: lastRsi > prevRsi,
+                        retracePct: Math.round(retrace * 100)
+                    };
+                }
             }
 
-            // ── SINAL SHORT: distribuição rompida para baixo ─────────────────
-            if (rsiWasOverbought && rsiFalling && topHolding && isConsolidating && breakoutDown) {
-                return {
-                    isLong: false, price: cur.close, rsi: lastRsi,
-                    tpPrice: bbLower, slPrice: bbUpper,
-                    candle: pat, highVolume
-                };
+            // ── SINAL SHORT ───────────────────────────────────────────────
+            // Último impulso foi para baixo: lastSL deve ser mais recente que lastSH
+            if (isDownTrend && lastSL.index > lastSH.index) {
+                const impulseHigh = lastSH.price;
+                const impulseLow = lastSL.price;
+                const impulseLeg = impulseHigh - impulseLow;
+                if (impulseLeg <= 0) return null;
+
+                // Candles do pullback: entre o swing low e o candle atual (exclusive)
+                const afterSL = wCandles.slice(lastSL.index + 1, -1);
+                if (afterSL.length < 1) return { isLong: null, rsi: lastRsi, reason: 'Aguardando pullback' };
+
+                const pullbackHigh = Math.max(...afterSL.map(c => c.high));
+                const retrace = (pullbackHigh - impulseLow) / impulseLeg;
+                const inZone = retrace >= 0.30 && retrace <= 0.65;
+
+                // Estrutura preservada: pullback não superou o swing high (distribuição intacta)
+                const structureOK = pullbackHigh < impulseHigh;
+
+                // Gatilho: fechamento abaixo da mínima do candle anterior
+                const breakout = cur.close < prev.low;
+
+                if (inZone && structureOK && breakout) {
+                    const slPrice = pullbackHigh;
+                    const risk = slPrice - cur.close;
+                    if (risk <= 0) return null;
+                    const rrTP = cur.close - 2 * risk;                          // RR 2:1
+                    const tpPrice = bbLower < cur.close ? Math.min(bbLower, rrTP) : rrTP;
+
+                    return {
+                        isLong: false, price: cur.close, rsi: lastRsi,
+                        tpPrice, slPrice, candle: pat,
+                        rsiBonus: lastRsi < prevRsi,
+                        retracePct: Math.round(retrace * 100)
+                    };
+                }
             }
 
             return {
                 isLong: null, price: cur.close, rsi: lastRsi,
-                reason: `IFR: ${lastRsi.toFixed(1)} | Consol: ${isConsolidating} | BreakUp: ${breakoutUp} | BreakDn: ${breakoutDown}`
+                reason: `Tendência: ${isUpTrend ? 'alta' : isDownTrend ? 'baixa' : 'indefinida'} | IFR: ${lastRsi.toFixed(1)}`
             };
         }
 
@@ -746,11 +816,10 @@ ${dir}
 
                     if (result.isLong === true || result.isLong === false) {
                         const dir = result.isLong ? 'LONG 🟢' : 'SHORT 🔴';
-                        const setupLbl = result.isLong ? 'Acumulação rompida' : 'Distribuição rompida';
-                        const rsiLbl = result.isLong ? 'RSI reagindo' : 'RSI caindo';
-                        const floorLbl = result.isLong ? 'Fundo respeitado' : 'Topo respeitado';
-                        const volLbl = result.highVolume ? ' | 🔥 Volume alto' : '';
-                        log(`🚀 ${symbol} — ${dir} | ${setupLbl} | ${rsiLbl} | ${floorLbl}${volLbl} | TP: ${result.tpPrice.toFixed(6)} | SL: ${result.slPrice.toFixed(6)}`);
+                        const setupLbl = result.isLong ? 'Rompimento da retomada' : 'Continuação vendedora';
+                        const trendLbl = result.isLong ? 'Tendência Alta' : 'Tendência Baixa';
+                        const bonusLbl = result.rsiBonus ? ` | IFR ${result.isLong ? 'reagindo' : 'caindo'}` : '';
+                        log(`🚀 ${symbol} — ${dir} | SMC Pullback | ${trendLbl} | ${setupLbl} | Retração ${result.retracePct}%${bonusLbl} | TP: ${result.tpPrice.toFixed(6)} | SL: ${result.slPrice.toFixed(6)}`);
                         showSignalCard(result.isLong, symbol, result.price, result.rsi, result.tpPrice, result.slPrice, result.candle);
                         playAlert(result.isLong);
                         lastSignalTimestamps[symbol] = currentTs;
@@ -758,7 +827,7 @@ ${dir}
 
                         const bankInput = document.getElementById('bankValue').value;
                         const bank = (bankInput && Number(bankInput) > 0) ? Number(bankInput) : 100;
-                        const tgMsg = buildTelegramMsg(result.isLong, symbol, result.price, result.rsi, result.tpPrice, result.slPrice, result.candle, result.highVolume, bank);
+                        const tgMsg = buildTelegramMsg(result.isLong, symbol, result.price, result.rsi, result.tpPrice, result.slPrice, result.candle, result.rsiBonus, result.retracePct, bank);
                         sendTelegram(tgMsg)
                             .then(() => log(`📬 Sinal de ${symbol} enviado para o Telegram!`))
                             .catch(err => log(`⚠️ Telegram erro (${symbol}): ${err.message}`));
@@ -789,7 +858,7 @@ ${dir}
             isRunning = true;
             setBtnState(true);
             updateStatus('🟢 Ativo — iniciando varredura...');
-            log('▶️ Bot iniciado! Monitorando todos os ativos USDT (1H) — Acumulação/Distribuição + RSI + Rompimento.');
+            log('▶️ Bot iniciado! Monitorando todos os ativos USDT (1H) — SMC Pullback Strategy.');
             checkSignal();
             botInterval = setInterval(checkSignal, checkInterval);
             showSnackbar('Bot iniciado!');
@@ -819,10 +888,10 @@ ${dir}
         document.addEventListener('DOMContentLoaded', () => {
             setBtnState(false);
             updateStatus('✅ Pronto para iniciar!');
-            log('📊 Bot carregado. Estratégia: Acumulação/Distribuição + RSI Inteligente + Rompimento (1H)');
-            log('ℹ️  LONG : RSI sobrevendido → reagindo | Fundo segurando | Consolidação | Rompe máxima');
-            log('ℹ️  SHORT: RSI sobrecomprado → caindo  | Topo segurando  | Consolidação | Rompe mínima');
-            log('📐 TP = BB Superior | SL = BB Inferior (Bollinger 20,2)');
+            log('📊 Bot carregado. Estratégia: SMC Pullback — HH/HL + EMA21 + Pullback 30–65% + Rompimento (1H)');
+            log('ℹ️  LONG : Tendência Alta (HH/HL) | Pullback 30–65% | Rompe máxima do candle anterior');
+            log('ℹ️  SHORT: Tendência Baixa (LH/LL) | Pullback 30–65% | Rompe mínima do candle anterior');
+            log('📐 TP = BB oposta / RR 2:1 | SL = Fundo/Topo do pullback');
         });
     </script>
 </body>
