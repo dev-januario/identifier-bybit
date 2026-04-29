@@ -366,8 +366,8 @@
         const EMA_FILTER_PERIOD = 21;    // EMA21 — filtro secundário de tendência
         const MAX_LEVERAGE = 15;
         const POSITION_SIZE = 50;
-        const RSI_OVERBOUGHT = 70;       // IFR sobrecomprado — gatilho SHORT contra downtrend
-        const RSI_OVERSOLD = 30;         // IFR sobrevendido — gatilho LONG contra uptrend
+        const RSI_OVERBOUGHT = 60;       // IFR sobrecomprado — gatilho SHORT contra downtrend
+        const RSI_OVERSOLD = 40;         // IFR sobrevendido — gatilho LONG contra uptrend
         const SWING_LOOKBACK = 5;        // swing points com 5 candles de confirmação em cada lado
         const checkInterval = 15 * 60 * 1000; // verifica a cada 15 min (candle 1H)
         const SCAN_DELAY_MS = 200;            // pausa entre requisições (ms)
@@ -601,24 +601,6 @@ ${dir}
             return { swingHighs, swingLows };
         }
 
-        // ── Análise principal: Reversão por IFR Extremo contra a Tendência ─────
-        //
-        // SINAL SHORT — todos devem ser verdadeiros:
-        //   1. Tendência de baixa clara : LH + LL nos swings | preço abaixo da EMA21
-        //   2. Pullback sobrecomprado   : IFR(14) do candle anterior ≥ 70 (excesso contra tendência)
-        //   3. IFR revertendo           : IFR atual < IFR anterior (abandono da sobrecompra)
-        //   4. Vela de reversão de OURO : corpo vermelho > corpo verde anterior
-        //                                 + pavio superior > corpo verde anterior (rejeição)
-        //
-        // SINAL LONG — todos devem ser verdadeiros:
-        //   1. Tendência de alta clara  : HH + HL nos swings | preço acima da EMA21
-        //   2. Pullback sobrevendido    : IFR(14) do candle anterior ≤ 30 (excesso contra tendência)
-        //   3. IFR revertendo           : IFR atual > IFR anterior (abandono da sobrevenda)
-        //   4. Vela de reversão de OURO : corpo verde > corpo vermelho anterior
-        //                                 + pavio inferior > corpo vermelho anterior (suporte)
-        //
-        // TP : Banda BB oposta (20,2) ou RR 2:1 — o que for mais distante do entry
-        // SL : Topo/Fundo da vela de reversão
         function analyzeSignal(candles) {
             const minLen = 60;
             if (candles.length < minLen) return null;
@@ -881,9 +863,9 @@ ${dir}
                 else localStorage.removeItem('bankValue');
             });
 
-            log('📊 Bot carregado. Estratégia: Reversão IFR Extremo — LH/LL ou HH/HL + EMA21 + IFR ≥70/≤30 + Vela de OURO (1H)');
-            log('ℹ️  LONG : Tendência Alta (HH/HL) | IFR ≤ 30 no pullback | Vela verde engolfa vermelha + pavio inferior');
-            log('ℹ️  SHORT: Tendência Baixa (LH/LL) | IFR ≥ 70 no pullback | Vela vermelha engolfa verde + pavio superior');
+            log('📊 Bot carregado. Estratégia: Reversão IFR Extremo — LH/LL ou HH/HL + EMA21 + IFR ≥60/≤40 + Vela de OURO (1H)');
+            log('ℹ️  LONG : Tendência Alta (HH/HL) | IFR ≤ 40 no pullback | Vela verde engolfa vermelha + pavio inferior');
+            log('ℹ️  SHORT: Tendência Baixa (LH/LL) | IFR ≥ 60 no pullback | Vela vermelha engolfa verde + pavio superior');
             log('📐 TP = BB oposta / RR 2:1 | SL = Topo/Fundo da vela de reversão');
 
             // Retoma bot automaticamente se estava ativo antes de sair da página
