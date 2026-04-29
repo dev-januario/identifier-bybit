@@ -662,8 +662,8 @@ ${dir}
             if (candles.length < minLen) return null;
 
             const closes = candles.map(c => c.close);
-            const cur = candles[candles.length - 1]; // candle atual (fechado)
-            const prev = candles[candles.length - 2]; // candle anterior
+            const cur = candles[candles.length - 2]; // último candle FECHADO (confirmado)
+            const prev = candles[candles.length - 3]; // candle anterior ao fechado
 
             // Janela de trabalho: últimos 100 candles para detecção de swings
             const wCandles = candles.slice(-100);
@@ -871,7 +871,7 @@ ${dir}
                     const candles = await fetchKlineData(symbol, INTERVAL, 250);
                     if (candles.length < 120) { await delay(SCAN_DELAY_MS); continue; }
 
-                    const currentTs = candles[candles.length - 1].time;
+                    const currentTs = candles[candles.length - 2].time; // timestamp do candle fechado
                     // evita re-alertar no mesmo candle para o mesmo ativo
                     if (lastSignalTimestamps[symbol] === currentTs) { await delay(SCAN_DELAY_MS); continue; }
 
