@@ -306,7 +306,7 @@
 <body>
     <div class="container">
         <h1>� Multi-Ativos — Bot Bybit</h1>
-        <h2>Identificador de Pullbacks — Todos os Ativos USDT (1H)</h2>
+        <h2>Reversão IFR Extremo contra Tendência — Todos os Ativos USDT (1H)</h2>
 
         <div class="status">
             <strong>Status:</strong> <span id="status">Inicializando...</span>
@@ -366,8 +366,8 @@
         const EMA_FILTER_PERIOD = 21;    // EMA21 — filtro secundário de tendência
         const MAX_LEVERAGE = 15;
         const POSITION_SIZE = 50;
-        const MIN_IMPULSE_PCT = 0.025;   // impulso mínimo de 2,5% para sinal válido
-        const MAX_PULLBACK_CANDLES = 20; // pullback deve ter no máx 20 candles desde o swing
+        const RSI_OVERBOUGHT = 70;       // IFR sobrecomprado — gatilho SHORT contra downtrend
+        const RSI_OVERSOLD = 30;         // IFR sobrevendido — gatilho LONG contra uptrend
         const SWING_LOOKBACK = 5;        // swing points com 5 candles de confirmação em cada lado
         const checkInterval = 15 * 60 * 1000; // verifica a cada 15 min (candle 1H)
         const SCAN_DELAY_MS = 200;            // pausa entre requisições (ms)
@@ -425,21 +425,21 @@
             const dir = isLong ? '🟢 LONG (COMPRA)' : '🔴 SHORT (VENDA)';
             const trendLbl = isLong ? '📈 Alta — HH/HL + preço acima da EMA21' : '📉 Baixa — LH/LL + preço abaixo da EMA21';
             const setupLbl = isLong
-                ? 'Pullback em tendência de alta — Rompimento da retomada'
-                : 'Pullback em tendência de baixa — Continuação vendedora';
+                ? 'Reversão Bullish — IFR sobrevendido contra a tendência de alta'
+                : 'Reversão Bearish — IFR sobrecomprado contra a tendência de baixa';
             const rsiLbl = isLong
-                ? `IFR(14) em ganho de força (${rsiVal.toFixed(1)})`
-                : `IFR(14) em perda de força (${rsiVal.toFixed(1)})`;
-            const bonusLbl = rsiBonus ? '✅ IFR favorável' : '⚠️ IFR neutro';
+                ? `IFR(14) revertendo da sobrevenda (${rsiVal.toFixed(1)})`
+                : `IFR(14) revertendo da sobrecompra (${rsiVal.toFixed(1)})`;
+            const bonusLbl = '✅ Vela de reversão de OURO confirmada';
             const bbTpLabel = isLong ? 'BB Superior (20,2) / RR 2:1' : 'BB Inferior (20,2) / RR 2:1';
-            const bbSlLabel = isLong ? 'Fundo do pullback' : 'Topo do pullback';
+            const bbSlLabel = isLong ? 'Fundo da vela de reversão' : 'Topo da vela de reversão';
             const entrada = bankValue * (POSITION_SIZE / 100);
             const tpPct = ((Math.abs(tpPrice - price) / price) * 100).toFixed(2);
             const slPct = ((Math.abs(slPrice - price) / price) * 100).toFixed(2);
             const now = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
             const ticker = symbol.replace('USDT', '');
 
-            return `🚨 <b>SMC PULLBACK — ${symbol} (1H)</b>
+            return `🚨 <b>REVERSÃO IFR EXTREMO — ${symbol} (1H)</b>
 
 ${dir}
 📅 ${now}
@@ -458,7 +458,7 @@ ${dir}
 
 📊 <b>Padrão de candle:</b> ${candlePat || 'Nenhum'}
 
-#Bybit #SMCPullback #${ticker}`;
+#Bybit #ReversaoIFR #${ticker}`;
         }
 
         function playAlert(isLong) {
@@ -495,8 +495,8 @@ ${dir}
                 isLong ? '🟢 LONG — Buscar Entrada de Compra' : '🔴 SHORT — Buscar Entrada de Venda';
             document.getElementById('sig-symbol').textContent = symbol;
             document.getElementById('sig-trend').textContent = isLong
-                ? '📈 SMC Pullback Alta'
-                : '📉 SMC Pullback Baixa';
+                ? '📈 Reversão Bullish — IFR Extremo'
+                : '📉 Reversão Bearish — IFR Extremo';
             document.getElementById('sig-entry').textContent = price.toFixed(6);
             document.getElementById('sig-leverage').textContent = MAX_LEVERAGE + 'x';
             document.getElementById('sig-size').textContent = POSITION_SIZE + '%  ($' + entrada.toFixed(2) + ')';
@@ -601,24 +601,24 @@ ${dir}
             return { swingHighs, swingLows };
         }
 
-        // ── Análise principal: SMC Pullback ──────────────────────────────────
-        //
-        // SINAL LONG — todos devem ser verdadeiros:
-        //   1. Tendência de alta : HH + HL nos swing points recentes | preço > EMA21
-        //   2. Impulso anterior  : último swing high mais recente que o último swing low
-        //   3. Pullback saudável: recuo de 30–65% do impulso sem romper a estrutura
-        //   4. Gatilho de entrada: fechamento acima da máxima do candle anterior
-        //   Bônus               : IFR em ganho de força
+        // ── Análise principal: Reversão por IFR Extremo contra a Tendência ─────
         //
         // SINAL SHORT — todos devem ser verdadeiros:
-        //   1. Tendência de baixa: LH + LL nos swing points recentes | preço < EMA21
-        //   2. Impulso anterior  : último swing low mais recente que o último swing high
-        //   3. Pullback saudável: recuo de 30–65% do impulso sem romper a estrutura
-        //   4. Gatilho de entrada: fechamento abaixo da mínima do candle anterior
-        //   Bônus               : IFR em perda de força
+        //   1. Tendência de baixa clara : LH + LL nos swings | preço abaixo da EMA21
+        //   2. Pullback sobrecomprado   : IFR(14) do candle anterior ≥ 70 (excesso contra tendência)
+        //   3. IFR revertendo           : IFR atual < IFR anterior (abandono da sobrecompra)
+        //   4. Vela de reversão de OURO : corpo vermelho > corpo verde anterior
+        //                                 + pavio superior > corpo verde anterior (rejeição)
+        //
+        // SINAL LONG — todos devem ser verdadeiros:
+        //   1. Tendência de alta clara  : HH + HL nos swings | preço acima da EMA21
+        //   2. Pullback sobrevendido    : IFR(14) do candle anterior ≤ 30 (excesso contra tendência)
+        //   3. IFR revertendo           : IFR atual > IFR anterior (abandono da sobrevenda)
+        //   4. Vela de reversão de OURO : corpo verde > corpo vermelho anterior
+        //                                 + pavio inferior > corpo vermelho anterior (suporte)
         //
         // TP : Banda BB oposta (20,2) ou RR 2:1 — o que for mais distante do entry
-        // SL : Fundo/Topo do pullback
+        // SL : Topo/Fundo da vela de reversão
         function analyzeSignal(candles) {
             const minLen = 60;
             if (candles.length < minLen) return null;
@@ -632,16 +632,16 @@ ${dir}
             const wHighs = wCandles.map(c => c.high);
             const wLows = wCandles.map(c => c.low);
 
-            // ── Swing points ──
+            // ── Swing points (estrutura de mercado) ──
             const { swingHighs, swingLows } = findSwings(wHighs, wLows, SWING_LOOKBACK);
             if (swingHighs.length < 2 || swingLows.length < 2) return null;
 
-            const lastSH = swingHighs[swingHighs.length - 1]; // swing high mais recente
-            const prev2SH = swingHighs[swingHighs.length - 2]; // swing high anterior
-            const lastSL = swingLows[swingLows.length - 1];   // swing low mais recente
-            const prev2SL = swingLows[swingLows.length - 2];   // swing low anterior
+            const lastSH = swingHighs[swingHighs.length - 1];
+            const prev2SH = swingHighs[swingHighs.length - 2];
+            const lastSL = swingLows[swingLows.length - 1];
+            const prev2SL = swingLows[swingLows.length - 2];
 
-            // ── EMA21 (filtro secundário) ──
+            // ── EMA21 (filtro de tendência) ──
             const ema21Arr = ema(closes, EMA_FILTER_PERIOD);
             const lastEma21 = ema21Arr[ema21Arr.length - 1];
 
@@ -652,97 +652,67 @@ ${dir}
             const isUpTrend = isHHHL && cur.close > lastEma21;
             const isDownTrend = isLHLL && cur.close < lastEma21;
 
-            // ── Indicadores auxiliares (TP/SL e bônus) ──
+            // ── Bollinger Bands (TP) e RSI ──
             const bb = bollingerBands(closes, BB_PERIOD, BB_STD);
             const bbUpper = bb.upper[bb.upper.length - 1];
             const bbLower = bb.lower[bb.lower.length - 1];
             const rsiArr = rsi(closes, RSI_PERIOD);
             const lastRsi = rsiArr[rsiArr.length - 1];
             const prevRsi = rsiArr.length > 1 ? rsiArr[rsiArr.length - 2] : lastRsi;
-            const pat = candlePattern(candles);
 
-            // ── SINAL LONG ───────────────────────────────────────────────
-            // Último impulso foi para cima: lastSH deve ser mais recente que lastSL
-            if (isUpTrend && lastSH.index > lastSL.index) {
-                const impulseLow = lastSL.price;
-                const impulseHigh = lastSH.price;
-                const impulseLeg = impulseHigh - impulseLow;
-                if (impulseLeg <= 0) return null;
+            // ── Vela de Reversão de OURO ─────────────────────────────────────────
+            // Corpo e pavio maiores que a vela contrária anterior (rejeição de preço)
+            const curBody = Math.abs(cur.close - cur.open);
+            const prevBody = Math.abs(prev.close - prev.open);
+            const curUpperWick = cur.high - Math.max(cur.open, cur.close);
+            const curLowerWick = Math.min(cur.open, cur.close) - cur.low;
 
-                // Impulso mínimo de MIN_IMPULSE_PCT para evitar mercados em range
-                if (impulseLeg / impulseLow < MIN_IMPULSE_PCT) return null;
+            // Bearish: vela vermelha, corpo > corpo verde anterior, pavio sup > corpo verde anterior
+            const bearishReversal =
+                cur.close < cur.open &&
+                prev.close > prev.open &&
+                curBody > prevBody &&
+                curUpperWick > prevBody;
 
-                // Candles do pullback: entre o swing high e o candle atual (exclusive)
-                const afterSH = wCandles.slice(lastSH.index + 1, -1);
-                if (afterSH.length < 1) return { isLong: null, rsi: lastRsi, reason: 'Aguardando pullback' };
-                if (afterSH.length > MAX_PULLBACK_CANDLES) return { isLong: null, rsi: lastRsi, reason: 'Pullback antigo — aguardando novo impulso' };
+            // Bullish: vela verde, corpo > corpo vermelho anterior, pavio inf > corpo vermelho anterior
+            const bullishReversal =
+                cur.close > cur.open &&
+                prev.close < prev.open &&
+                curBody > prevBody &&
+                curLowerWick > prevBody;
 
-                const pullbackLow = Math.min(...afterSH.map(c => c.low));
-                const retrace = (impulseHigh - pullbackLow) / impulseLeg;
-                const inZone = retrace >= 0.30 && retrace <= 0.65;
-
-                // Estrutura preservada: pullback não cedeu o swing low (impulso intacto)
-                const structureOK = pullbackLow > impulseLow;
-
-                // Gatilho: fechamento acima da máxima do candle anterior
-                const breakout = cur.close > prev.high;
-
-                if (inZone && structureOK && breakout) {
-                    const slPrice = pullbackLow;
-                    const risk = cur.close - slPrice;
-                    if (risk <= 0) return null;
-                    const rrTP = cur.close + 2 * risk;                         // RR 2:1
-                    const tpPrice = bbUpper > cur.close ? Math.max(bbUpper, rrTP) : rrTP;
-
-                    return {
-                        isLong: true, price: cur.close, rsi: lastRsi,
-                        tpPrice, slPrice, candle: pat,
-                        rsiBonus: lastRsi > prevRsi,
-                        retracePct: Math.round(retrace * 100)
-                    };
-                }
+            // ── SINAL SHORT ───────────────────────────────────────────────────────
+            // Downtrend + IFR sobrecomprado no candle anterior + vela de reversão bearish
+            if (isDownTrend && prevRsi >= RSI_OVERBOUGHT && lastRsi < prevRsi && bearishReversal) {
+                const slPrice = cur.high;                       // topo da vela de reversão
+                const risk = slPrice - cur.close;
+                if (risk <= 0) return null;
+                const rrTP = cur.close - 2 * risk;
+                const tpPrice = bbLower < cur.close ? Math.min(bbLower, rrTP) : rrTP;
+                return {
+                    isLong: false, price: cur.close, rsi: lastRsi,
+                    tpPrice, slPrice,
+                    candle: `Reversão Bearish — IFR sobrecomprado (${prevRsi.toFixed(1)})`,
+                    rsiBonus: true,
+                    retracePct: Math.round(((cur.close - lastSL.price) / Math.max(lastSH.price - lastSL.price, 0.0001)) * 100)
+                };
             }
 
-            // ── SINAL SHORT ───────────────────────────────────────────────
-            // Último impulso foi para baixo: lastSL deve ser mais recente que lastSH
-            if (isDownTrend && lastSL.index > lastSH.index) {
-                const impulseHigh = lastSH.price;
-                const impulseLow = lastSL.price;
-                const impulseLeg = impulseHigh - impulseLow;
-                if (impulseLeg <= 0) return null;
-
-                // Impulso mínimo de MIN_IMPULSE_PCT para evitar mercados em range
-                if (impulseLeg / impulseHigh < MIN_IMPULSE_PCT) return null;
-
-                // Candles do pullback: entre o swing low e o candle atual (exclusive)
-                const afterSL = wCandles.slice(lastSL.index + 1, -1);
-                if (afterSL.length < 1) return { isLong: null, rsi: lastRsi, reason: 'Aguardando pullback' };
-                if (afterSL.length > MAX_PULLBACK_CANDLES) return { isLong: null, rsi: lastRsi, reason: 'Pullback antigo — aguardando novo impulso' };
-
-                const pullbackHigh = Math.max(...afterSL.map(c => c.high));
-                const retrace = (pullbackHigh - impulseLow) / impulseLeg;
-                const inZone = retrace >= 0.30 && retrace <= 0.65;
-
-                // Estrutura preservada: pullback não superou o swing high (distribuição intacta)
-                const structureOK = pullbackHigh < impulseHigh;
-
-                // Gatilho: fechamento abaixo da mínima do candle anterior
-                const breakout = cur.close < prev.low;
-
-                if (inZone && structureOK && breakout) {
-                    const slPrice = pullbackHigh;
-                    const risk = slPrice - cur.close;
-                    if (risk <= 0) return null;
-                    const rrTP = cur.close - 2 * risk;                          // RR 2:1
-                    const tpPrice = bbLower < cur.close ? Math.min(bbLower, rrTP) : rrTP;
-
-                    return {
-                        isLong: false, price: cur.close, rsi: lastRsi,
-                        tpPrice, slPrice, candle: pat,
-                        rsiBonus: lastRsi < prevRsi,
-                        retracePct: Math.round(retrace * 100)
-                    };
-                }
+            // ── SINAL LONG ────────────────────────────────────────────────────────
+            // Uptrend + IFR sobrevendido no candle anterior + vela de reversão bullish
+            if (isUpTrend && prevRsi <= RSI_OVERSOLD && lastRsi > prevRsi && bullishReversal) {
+                const slPrice = cur.low;                        // fundo da vela de reversão
+                const risk = cur.close - slPrice;
+                if (risk <= 0) return null;
+                const rrTP = cur.close + 2 * risk;
+                const tpPrice = bbUpper > cur.close ? Math.max(bbUpper, rrTP) : rrTP;
+                return {
+                    isLong: true, price: cur.close, rsi: lastRsi,
+                    tpPrice, slPrice,
+                    candle: `Reversão Bullish — IFR sobrevendido (${prevRsi.toFixed(1)})`,
+                    rsiBonus: true,
+                    retracePct: Math.round(((lastSH.price - cur.close) / Math.max(lastSH.price - lastSL.price, 0.0001)) * 100)
+                };
             }
 
             return {
@@ -827,10 +797,10 @@ ${dir}
 
                     if (result.isLong === true || result.isLong === false) {
                         const dir = result.isLong ? 'LONG 🟢' : 'SHORT 🔴';
-                        const setupLbl = result.isLong ? 'Rompimento da retomada' : 'Continuação vendedora';
+                        const setupLbl = result.isLong ? 'Reversão Bullish' : 'Reversão Bearish';
                         const trendLbl = result.isLong ? 'Tendência Alta' : 'Tendência Baixa';
-                        const bonusLbl = result.rsiBonus ? ` | IFR ${result.isLong ? 'reagindo' : 'caindo'}` : '';
-                        log(`🚀 ${symbol} — ${dir} | SMC Pullback | ${trendLbl} | ${setupLbl} | Retração ${result.retracePct}%${bonusLbl} | TP: ${result.tpPrice.toFixed(6)} | SL: ${result.slPrice.toFixed(6)}`);
+                        const bonusLbl = ` | Vela de Ouro confirmada`;
+                        log(`🚀 ${symbol} — ${dir} | IFR Extremo | ${trendLbl} | ${setupLbl} | ${result.candle} | TP: ${result.tpPrice.toFixed(6)} | SL: ${result.slPrice.toFixed(6)}`);
                         showSignalCard(result.isLong, symbol, result.price, result.rsi, result.tpPrice, result.slPrice, result.candle);
                         playAlert(result.isLong);
                         window.open(`https://www.bybit.com/trade/usdt/${symbol}`, '_blank');
@@ -870,7 +840,7 @@ ${dir}
             isRunning = true;
             setBtnState(true);
             updateStatus('🟢 Ativo — iniciando varredura...');
-            log('▶️ Bot iniciado! Monitorando todos os ativos USDT (1H) — SMC Pullback Strategy.');
+            log('▶️ Bot iniciado! Monitorando todos os ativos USDT (1H) — Reversão IFR Extremo Strategy.');
             checkSignal();
             botInterval = setInterval(checkSignal, checkInterval);
             showSnackbar('Bot iniciado!');
@@ -900,10 +870,10 @@ ${dir}
         document.addEventListener('DOMContentLoaded', () => {
             setBtnState(false);
             updateStatus('✅ Pronto para iniciar!');
-            log('📊 Bot carregado. Estratégia: SMC Pullback — HH/HL + EMA21 + Pullback 30–65% + Rompimento (1H)');
-            log('ℹ️  LONG : Tendência Alta (HH/HL) | Pullback 30–65% | Rompe máxima do candle anterior');
-            log('ℹ️  SHORT: Tendência Baixa (LH/LL) | Pullback 30–65% | Rompe mínima do candle anterior');
-            log('📐 TP = BB oposta / RR 2:1 | SL = Fundo/Topo do pullback');
+            log('📊 Bot carregado. Estratégia: Reversão IFR Extremo — LH/LL ou HH/HL + EMA21 + IFR ≥70/≤30 + Vela de OURO (1H)');
+            log('ℹ️  LONG : Tendência Alta (HH/HL) | IFR ≤ 30 no pullback | Vela verde engolfa vermelha + pavio inferior');
+            log('ℹ️  SHORT: Tendência Baixa (LH/LL) | IFR ≥ 70 no pullback | Vela vermelha engolfa verde + pavio superior');
+            log('📐 TP = BB oposta / RR 2:1 | SL = Topo/Fundo da vela de reversão');
         });
     </script>
 </body>
