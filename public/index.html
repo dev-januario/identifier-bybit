@@ -316,7 +316,7 @@
             <div class="signal-title" id="signal-title"></div>
             <div class="signal-rows">
                 <div class="signal-item"><span>Ativo</span><strong id="sig-symbol">—</strong></div>
-                <div class="signal-item"><span>Condição IFR</span><strong id="sig-trend">—</strong></div>
+                <div class="signal-item"><span>Tendência</span><strong id="sig-trend">—</strong></div>
                 <div class="signal-item"><span>Entrada</span><strong id="sig-entry">—</strong></div>
                 <div class="signal-item"><span>Alavancagem</span><strong id="sig-leverage">—</strong></div>
                 <div class="signal-item"><span>Banca sugerida</span><strong id="sig-size">50%</strong></div>
@@ -363,8 +363,10 @@
         const BB_PERIOD = 20;            // Bollinger Bands — também define TP/SL
         const BB_STD = 2;
         const RSI_PERIOD = 14;
-        const RSI_OVERSOLD = 35;         // IFR cruza abaixo → sinal de LONG (sobrevendido)
-        const RSI_OVERBOUGHT = 65;       // IFR cruza acima → sinal de SHORT (sobrecomprado)
+        const RSI_OVERSOLD = 35;         // IFR ≤ 35 → condição de LONG (sobrevendido)
+        const RSI_OVERBOUGHT = 65;       // IFR ≥ 65 → condição de SHORT (sobrecomprado)
+        const EMA_FAST_PERIOD = 21;      // EMA rápida — filtro de tendência
+        const EMA_SLOW_PERIOD = 100;     // EMA lenta  — filtro de tendência
         const MAX_LEVERAGE = 15;
         const POSITION_SIZE = 50;
         const checkInterval = 15 * 60 * 1000; // verifica a cada 15 min (candle 1H)
@@ -419,11 +421,17 @@
             return res.json();
         }
 
-        function buildTelegramMsg(isLong, symbol, price, rsiVal, tpPrice, slPrice, candlePat, bankValue) {
+        function buildTelegramMsg(isLong, symbol, price, rsiVal, tpPrice, slPrice, candlePat, trend, bankValue) {
             const dir = isLong ? '🟢 LONG (COMPRA)' : '🔴 SHORT (VENDA)';
-            const rsiCrossLabel = isLong
-                ? `IFR(14) cruzou abaixo de ${RSI_OVERSOLD} → sobrevendido`
-                : `IFR(14) cruzou acima de ${RSI_OVERBOUGHT} → sobrecomprado`;
+            const trendLabel = isLong
+                ? '🔼 Alta confirmada — EMA21 > EMA100, inclinada ↑'
+                : '🔽 Baixa confirmada — EMA21 < EMA100, inclinada ↓';
+            const rsiLabel = isLong
+                ? `IFR(14) sobrevendido (≤ ${RSI_OVERSOLD})`
+                : `IFR(14) sobrecomprado (≥ ${RSI_OVERBOUGHT})`;
+            const bbLabel = isLong ? 'Banda inferior tocada' : 'Banda superior tocada';
+            const bbTpLabel = isLong ? 'Banda Superior BB(20)' : 'Banda Inferior BB(20)';
+            const bbSlLabel = isLong ? 'Banda Inferior BB(20)' : 'Banda Superior BB(20)';
             const entrada = bankValue * (POSITION_SIZE / 100);
             const tpPct = ((Math.abs(tpPrice - price) / price) * 100).toFixed(2);
             const slPct = ((Math.abs(slPrice - price) / price) * 100).toFixed(2);
@@ -435,18 +443,20 @@
 ${dir}
 📅 ${now}
 
-📉 <b>IFR:</b> ${rsiVal.toFixed(2)} — ${rsiCrossLabel}
+📈 <b>Tendência:</b> ${trendLabel}
+📉 <b>IFR(14):</b> ${rsiVal.toFixed(2)} — ${rsiLabel}
+📊 <b>Bollinger:</b> ${bbLabel}
 
 💵 <b>Entrada:</b> ${price.toFixed(6)} USDT
-🎯 <b>TP:</b> ${tpPrice.toFixed(6)} USDT (+${tpPct}%) — Banda Superior BB(20)
-🛡 <b>SL:</b> ${slPrice.toFixed(6)} USDT (-${slPct}%) — Banda Inferior BB(20)
+🎯 <b>TP:</b> ${tpPrice.toFixed(6)} USDT (+${tpPct}%) — ${bbTpLabel}
+🛡 <b>SL:</b> ${slPrice.toFixed(6)} USDT (-${slPct}%) — ${bbSlLabel}
 💰 <b>Banca:</b> ${POSITION_SIZE}% ($${entrada.toFixed(2)})
 ⚖️ <b>Alavancagem sugerida:</b> até ${MAX_LEVERAGE}x
 
 📊 <b>Indicadores</b>
 • Candle: ${candlePat || 'Nenhum'}
 
-#Bybit #Pullback #${ticker}`;
+#Bybit #Sinal #${ticker}`;
         }
 
         function playAlert(isLong) {
@@ -482,7 +492,9 @@ ${dir}
             document.getElementById('signal-title').textContent =
                 isLong ? '🟢 LONG — Buscar Entrada de Compra' : '🔴 SHORT — Buscar Entrada de Venda';
             document.getElementById('sig-symbol').textContent = symbol;
-            document.getElementById('sig-trend').textContent = isLong ? `📉 Sobrevendido (IFR < ${RSI_OVERSOLD})` : `📈 Sobrecomprado (IFR > ${RSI_OVERBOUGHT})`;
+            document.getElementById('sig-trend').textContent = isLong
+                ? '🔼 Alta (EMA21 > EMA100 ↑)'
+                : '🔽 Baixa (EMA21 < EMA100 ↓)';
             document.getElementById('sig-entry').textContent = price.toFixed(6);
             document.getElementById('sig-leverage').textContent = MAX_LEVERAGE + 'x';
             document.getElementById('sig-size').textContent = POSITION_SIZE + '%  ($' + entrada.toFixed(2) + ')';
@@ -564,50 +576,78 @@ ${dir}
             return null;
         }
 
+        // ── Detecção de tendência: EMA21 × EMA100 ────────────────────────────────
+        // Alta:  preço > EMA21  E  EMA21 > EMA100  E  EMA21 inclinada para cima
+        // Baixa: preço < EMA21  E  EMA21 < EMA100  E  EMA21 inclinada para baixo
+        // Retorna 'up', 'down' ou null (lateral / indefinida)
+        function detectTrend(closes) {
+            const ema21 = ema(closes, EMA_FAST_PERIOD);
+            const ema100 = ema(closes, EMA_SLOW_PERIOD);
+            if (ema21.length < 2 || ema100.length < 1) return null;
+
+            const price = closes[closes.length - 1];
+            const lastEma21 = ema21[ema21.length - 1];
+            const prevEma21 = ema21[ema21.length - 2];
+            const lastEma100 = ema100[ema100.length - 1];
+
+            const slopeUp = lastEma21 > prevEma21;
+            const slopeDown = lastEma21 < prevEma21;
+
+            if (price > lastEma21 && lastEma21 > lastEma100 && slopeUp) return 'up';
+            if (price < lastEma21 && lastEma21 < lastEma100 && slopeDown) return 'down';
+            return null; // lateral
+        }
+
         // ── Análise principal ────────────────────────────────────────────────────
-        // Lógica: IFR(14) cruza zona extrema = sinal puro de reversão
-        //   IFR cruza ABAIXO de 35 → LONG (sobrevendido)
-        //   IFR cruza ACIMA  de 65 → SHORT (sobrecomprado)
-        // TP/SL dinâmicos via Bollinger Bands(20,2):
-        //   LONG:  TP = banda superior, SL = banda inferior
-        //   SHORT: TP = banda inferior, SL = banda superior
+        // Condições para LONG (todos devem ser verdadeiros):
+        //   1. Tendência de alta (EMA21 > EMA100, inclinada ↑, preço > EMA21)
+        //   2. IFR(14) ≤ 35  — zona de sobrevendido
+        //   3. Preço toca ou rompe a banda inferior de Bollinger
+        //
+        // Condições para SHORT (todos devem ser verdadeiros):
+        //   1. Tendência de baixa (EMA21 < EMA100, inclinada ↓, preço < EMA21)
+        //   2. IFR(14) ≥ 65  — zona de sobrecomprado
+        //   3. Preço toca ou rompe a banda superior de Bollinger
+        //
+        // TP/SL via Bollinger Bands(20,2):
+        //   LONG:  TP = banda superior | SL = banda inferior
+        //   SHORT: TP = banda inferior | SL = banda superior
         function analyzeSignal(candles) {
-            const minLen = Math.max(BB_PERIOD, RSI_PERIOD) + 10;
+            // precisa de pelo menos EMA100 + buffer confortável
+            const minLen = EMA_SLOW_PERIOD + 20;
             if (candles.length < minLen) return null;
 
             const closes = candles.map(c => c.close);
             const price = closes[closes.length - 1];
 
-            // IFR
+            // ── Tendência ──
+            const trend = detectTrend(closes);
+
+            // ── IFR(14) ──
             const rsiArr = rsi(closes, RSI_PERIOD);
-            if (rsiArr.length < 2) return null;
+            if (rsiArr.length < 1) return null;
             const lastRsi = rsiArr[rsiArr.length - 1];
-            const prevRsi = rsiArr[rsiArr.length - 2];
 
-            // Cruzamento: candle anterior estava acima/na linha, candle atual cruzou
-            const rsiCrossedBelow35 = prevRsi >= RSI_OVERSOLD && lastRsi < RSI_OVERSOLD;
-            const rsiCrossedAbove65 = prevRsi <= RSI_OVERBOUGHT && lastRsi > RSI_OVERBOUGHT;
-
-            // Bollinger Bands — usadas como TP/SL
+            // ── Bollinger Bands(20,2) ──
             const bb = bollingerBands(closes, BB_PERIOD, BB_STD);
             const bbUpper = bb.upper[bb.upper.length - 1];
             const bbLower = bb.lower[bb.lower.length - 1];
 
             const pat = candlePattern(candles);
 
-            // ── Sinal: IFR cruzou abaixo de 35 → LONG ──
-            if (rsiCrossedBelow35) {
-                return { isLong: true, price, rsi: lastRsi, tpPrice: bbUpper, slPrice: bbLower, candle: pat };
+            // ── SINAL LONG ──
+            if (trend === 'up' && lastRsi <= RSI_OVERSOLD && price <= bbLower) {
+                return { isLong: true, price, rsi: lastRsi, tpPrice: bbUpper, slPrice: bbLower, candle: pat, trend };
             }
 
-            // ── Sinal: IFR cruzou acima de 65 → SHORT ──
-            if (rsiCrossedAbove65) {
-                return { isLong: false, price, rsi: lastRsi, tpPrice: bbLower, slPrice: bbUpper, candle: pat };
+            // ── SINAL SHORT ──
+            if (trend === 'down' && lastRsi >= RSI_OVERBOUGHT && price >= bbUpper) {
+                return { isLong: false, price, rsi: lastRsi, tpPrice: bbLower, slPrice: bbUpper, candle: pat, trend };
             }
 
             return {
-                isLong: null, price, rsi: lastRsi,
-                reason: `IFR: ${lastRsi.toFixed(1)} — sem cruzamento`
+                isLong: null, price, rsi: lastRsi, trend,
+                reason: `Tendência: ${trend ?? 'lateral'} | IFR: ${lastRsi.toFixed(1)}`
             };
         }
 
@@ -675,8 +715,8 @@ ${dir}
                     const symbol = allSymbols[i];
                     updateStatus(`🔍 Escaneando ${i + 1}/${allSymbols.length} — ${symbol}`);
 
-                    const candles = await fetchKlineData(symbol, INTERVAL, 200);
-                    if (candles.length < 70) { await delay(SCAN_DELAY_MS); continue; }
+                    const candles = await fetchKlineData(symbol, INTERVAL, 250);
+                    if (candles.length < 120) { await delay(SCAN_DELAY_MS); continue; }
 
                     const currentTs = candles[candles.length - 1].time;
                     // evita re-alertar no mesmo candle para o mesmo ativo
@@ -687,10 +727,9 @@ ${dir}
 
                     if (result.isLong === true || result.isLong === false) {
                         const dir = result.isLong ? 'LONG 🟢' : 'SHORT 🔴';
-                        const rsiLabel = result.isLong
-                            ? `IFR cruzou < ${RSI_OVERSOLD} (${result.rsi.toFixed(1)}) — sobrevendido`
-                            : `IFR cruzou > ${RSI_OVERBOUGHT} (${result.rsi.toFixed(1)}) — sobrecomprado`;
-                        log(`🚀 ${symbol} — ${dir} | ${rsiLabel} | TP: ${result.tpPrice.toFixed(6)} | SL: ${result.slPrice.toFixed(6)}`);
+                        const trendLabel = result.isLong ? 'Alta confirmada' : 'Baixa confirmada';
+                        const bbTouchLbl = result.isLong ? 'Banda inferior tocada' : 'Banda superior tocada';
+                        log(`🚀 ${symbol} — ${dir} | ${trendLabel} | IFR ${result.rsi.toFixed(0)} | ${bbTouchLbl} | TP: ${result.tpPrice.toFixed(6)} | SL: ${result.slPrice.toFixed(6)}`);
                         showSignalCard(result.isLong, symbol, result.price, result.rsi, result.tpPrice, result.slPrice, result.candle);
                         playAlert(result.isLong);
                         lastSignalTimestamps[symbol] = currentTs;
@@ -698,7 +737,7 @@ ${dir}
 
                         const bankInput = document.getElementById('bankValue').value;
                         const bank = (bankInput && Number(bankInput) > 0) ? Number(bankInput) : 100;
-                        const tgMsg = buildTelegramMsg(result.isLong, symbol, result.price, result.rsi, result.tpPrice, result.slPrice, result.candle, bank);
+                        const tgMsg = buildTelegramMsg(result.isLong, symbol, result.price, result.rsi, result.tpPrice, result.slPrice, result.candle, result.trend, bank);
                         sendTelegram(tgMsg)
                             .then(() => log(`📬 Sinal de ${symbol} enviado para o Telegram!`))
                             .catch(err => log(`⚠️ Telegram erro (${symbol}): ${err.message}`));
@@ -729,7 +768,7 @@ ${dir}
             isRunning = true;
             setBtnState(true);
             updateStatus('🟢 Ativo — iniciando varredura...');
-            log('▶️ Bot iniciado! Monitorando todos os ativos USDT (1H) — IFR puro (sem filtro de tendência).');
+            log('▶️ Bot iniciado! Monitorando todos os ativos USDT (1H) — EMA21/EMA100 + IFR + Bollinger.');
             checkSignal();
             botInterval = setInterval(checkSignal, checkInterval);
             showSnackbar('Bot iniciado!');
@@ -759,9 +798,10 @@ ${dir}
         document.addEventListener('DOMContentLoaded', () => {
             setBtnState(false);
             updateStatus('✅ Pronto para iniciar!');
-            log('📊 Bot carregado. Estratégia: IFR(14) puro — Todos os ativos USDT (1H)');
-            log(`ℹ️  IFR < ${RSI_OVERSOLD} = 🟢 LONG | IFR > ${RSI_OVERBOUGHT} = 🔴 SHORT`);
-            log('📐 TP = Banda Superior BB(20,2) | SL = Banda Inferior BB(20,2)');
+            log('📊 Bot carregado. Estratégia: EMA21/EMA100 + IFR(14) + Bollinger(20,2) — 1H');
+            log('ℹ️  LONG: Alta confirmada + IFR ≤ 35 + Preço toca BB inferior');
+            log('ℹ️  SHORT: Baixa confirmada + IFR ≥ 65 + Preço toca BB superior');
+            log('📐 TP = Banda oposta BB(20,2) | SL = Banda de entrada BB(20,2)');
         });
     </script>
 </body>
