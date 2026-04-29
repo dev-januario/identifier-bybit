@@ -698,31 +698,37 @@ ${dir}
             const lastRsi = rsiArr[rsiArr.length - 1];
             const prevRsi = rsiArr.length > 1 ? rsiArr[rsiArr.length - 2] : lastRsi;
 
-            // ── Vela de Reversão de OURO ─────────────────────────────────────────
-            // Corpo e pavio maiores que a vela contrária anterior (rejeição de preço)
+            // ── Velas de PRATA e OURO ────────────────────────────────────────────
             const curBody = Math.abs(cur.close - cur.open);
             const prevBody = Math.abs(prev.close - prev.open);
-            const curUpperWick = cur.high - Math.max(cur.open, cur.close);
-            const curLowerWick = Math.min(cur.open, cur.close) - cur.low;
+            const curRange = cur.high - cur.low;
+            const prevRange = prev.high - prev.low;
 
-            // Bearish: vela vermelha, corpo > corpo verde anterior, pavio sup > corpo verde anterior
-            const bearishReversal =
-                cur.close < cur.open &&
-                prev.close > prev.open &&
-                curBody > prevBody &&
-                curUpperWick > prevBody;
-
-            // Bullish: vela verde, corpo > corpo vermelho anterior, pavio inf > corpo vermelho anterior
-            const bullishReversal =
+            // COMPRA — Vela de PRATA: candle verde com pavio OU corpo abaixo do último candle vermelho
+            const bullishSilver =
                 cur.close > cur.open &&
                 prev.close < prev.open &&
-                curBody > prevBody &&
-                curLowerWick > prevBody;
+                (cur.low < prev.low || Math.min(cur.open, cur.close) < Math.min(prev.open, prev.close));
 
-            // ── SINAL SHORT ───────────────────────────────────────────────────────
-            // Downtrend + IFR sobrecomprado no candle anterior + vela de reversão bearish
-            if (isDownTrend && prevRsi >= RSI_OVERBOUGHT && lastRsi < prevRsi && bearishReversal) {
-                const slPrice = cur.high;                       // topo da vela de reversão
+            // COMPRA — Vela de OURO: prata + candle verde maior (corpo ou range) que o vermelho
+            const bullishGold =
+                bullishSilver &&
+                (curBody > prevBody || curRange > prevRange);
+
+            // VENDA — Vela de PRATA: candle vermelho com pavio OU corpo acima do último candle verde
+            const bearishSilver =
+                cur.close < cur.open &&
+                prev.close > prev.open &&
+                (cur.high > prev.high || Math.max(cur.open, cur.close) > Math.max(prev.open, prev.close));
+
+            // VENDA — Vela de OURO: prata + candle vermelho maior (corpo ou range) que o verde
+            const bearishGold =
+                bearishSilver &&
+                (curBody > prevBody || curRange > prevRange);
+
+            // ── SINAL SHORT (confirmado — EMA21 + Vela de OURO) ─────────────────
+            if (isDownTrend && prevRsi >= RSI_OVERBOUGHT && lastRsi < prevRsi && bearishGold) {
+                const slPrice = cur.high;
                 const risk = slPrice - cur.close;
                 if (risk <= 0) return null;
                 const rrTP = cur.close - 2 * risk;
@@ -730,16 +736,15 @@ ${dir}
                 return {
                     isLong: false, price: cur.close, rsi: lastRsi,
                     tpPrice, slPrice,
-                    candle: `Reversão Bearish — IFR sobrecomprado (${prevRsi.toFixed(1)})`,
+                    candle: `🥇 Vela de OURO Bearish — IFR sobrecomprado (${prevRsi.toFixed(1)})`,
                     rsiBonus: true,
                     retracePct: Math.round(((cur.close - lastSL.price) / Math.max(lastSH.price - lastSL.price, 0.0001)) * 100)
                 };
             }
 
-            // ── SINAL LONG ────────────────────────────────────────────────────────
-            // Uptrend + IFR sobrevendido no candle anterior + vela de reversão bullish
-            if (isUpTrend && prevRsi <= RSI_OVERSOLD && lastRsi > prevRsi && bullishReversal) {
-                const slPrice = cur.low;                        // fundo da vela de reversão
+            // ── SINAL LONG (confirmado — EMA21 + Vela de OURO) ──────────────────
+            if (isUpTrend && prevRsi <= RSI_OVERSOLD && lastRsi > prevRsi && bullishGold) {
+                const slPrice = cur.low;
                 const risk = cur.close - slPrice;
                 if (risk <= 0) return null;
                 const rrTP = cur.close + 2 * risk;
@@ -747,40 +752,46 @@ ${dir}
                 return {
                     isLong: true, price: cur.close, rsi: lastRsi,
                     tpPrice, slPrice,
-                    candle: `Reversão Bullish — IFR sobrevendido (${prevRsi.toFixed(1)})`,
+                    candle: `🥇 Vela de OURO Bullish — IFR sobrevendido (${prevRsi.toFixed(1)})`,
                     rsiBonus: true,
                     retracePct: Math.round(((lastSH.price - cur.close) / Math.max(lastSH.price - lastSL.price, 0.0001)) * 100)
                 };
             }
 
-            // ── PRÉ-ALERTA LONG (HH/HL válido, mas preço abaixo da EMA21) ──
-            if (isHHHL && prevRsi <= RSI_OVERSOLD && lastRsi > prevRsi && bullishReversal) {
+            // ── PRÉ-ALERTA LONG (HH/HL válido, EMA21 não confirmada — Ouro ou Prata) ──
+            if (isHHHL && prevRsi <= RSI_OVERSOLD && lastRsi > prevRsi && bullishSilver) {
                 const slPrice = cur.low;
                 const risk = cur.close - slPrice;
                 if (risk > 0) {
                     const rrTP = cur.close + 2 * risk;
                     const tpPrice = bbUpper > cur.close ? Math.max(bbUpper, rrTP) : rrTP;
+                    const candleLabel = bullishGold
+                        ? `🥇 Vela de OURO Bullish — IFR sobrevendido (${prevRsi.toFixed(1)})`
+                        : `🥈 Vela de PRATA Bullish — IFR sobrevendido (${prevRsi.toFixed(1)})`;
                     return {
                         isLong: true, watchlist: true, price: cur.close, rsi: lastRsi,
                         tpPrice, slPrice,
-                        candle: `Reversão Bullish — IFR sobrevendido (${prevRsi.toFixed(1)})`,
+                        candle: candleLabel,
                         rsiBonus: true,
                         retracePct: Math.round(((lastSH.price - cur.close) / Math.max(lastSH.price - lastSL.price, 0.0001)) * 100)
                     };
                 }
             }
 
-            // ── PRÉ-ALERTA SHORT (LH/LL válido, mas preço acima da EMA21) ──
-            if (isLHLL && prevRsi >= RSI_OVERBOUGHT && lastRsi < prevRsi && bearishReversal) {
+            // ── PRÉ-ALERTA SHORT (LH/LL válido, EMA21 não confirmada — Ouro ou Prata) ──
+            if (isLHLL && prevRsi >= RSI_OVERBOUGHT && lastRsi < prevRsi && bearishSilver) {
                 const slPrice = cur.high;
                 const risk = slPrice - cur.close;
                 if (risk > 0) {
                     const rrTP = cur.close - 2 * risk;
                     const tpPrice = bbLower < cur.close ? Math.min(bbLower, rrTP) : rrTP;
+                    const candleLabel = bearishGold
+                        ? `🥇 Vela de OURO Bearish — IFR sobrecomprado (${prevRsi.toFixed(1)})`
+                        : `🥈 Vela de PRATA Bearish — IFR sobrecomprado (${prevRsi.toFixed(1)})`;
                     return {
                         isLong: false, watchlist: true, price: cur.close, rsi: lastRsi,
                         tpPrice, slPrice,
-                        candle: `Reversão Bearish — IFR sobrecomprado (${prevRsi.toFixed(1)})`,
+                        candle: candleLabel,
                         rsiBonus: true,
                         retracePct: Math.round(((cur.close - lastSL.price) / Math.max(lastSH.price - lastSL.price, 0.0001)) * 100)
                     };
