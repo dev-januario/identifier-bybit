@@ -118,6 +118,16 @@
             line-height: 1.5;
         }
 
+        #log a {
+            color: #4A90E2;
+            text-decoration: underline;
+            font-weight: 700;
+        }
+
+        #log a:hover {
+            color: #5DAEFF;
+        }
+
         input[type="number"] {
             padding: 10px;
             border-radius: 8px;
@@ -227,6 +237,12 @@
         #signal-card.short {
             background: #2B0D0D;
             border-color: #D73A49;
+        }
+
+        #signal-card.watchlist-long,
+        #signal-card.watchlist-short {
+            background: #261A00;
+            border-color: #F5A623;
         }
 
         @keyframes pulse {
@@ -461,6 +477,42 @@ ${dir}
 #Bybit #ReversaoIFR #${ticker}`;
         }
 
+        function buildTelegramWatchlistMsg(isLong, symbol, price, rsiVal, tpPrice, slPrice, candlePat, retracePct, bankValue) {
+            const dir = isLong ? '🟡 PRÉ-ALERTA LONG' : '🟡 PRÉ-ALERTA SHORT';
+            const trendLbl = isLong
+                ? '📈 Estrutura Alta (HH/HL) confirmada — preço ainda abaixo da EMA21'
+                : '📉 Estrutura Baixa (LH/LL) confirmada — preço ainda acima da EMA21';
+            const setupLbl = isLong
+                ? 'Reversão Bullish potencial — IFR sobrevendido + vela de reversão'
+                : 'Reversão Bearish potencial — IFR sobrecomprado + vela de reversão';
+            const entrada = bankValue * (POSITION_SIZE / 100);
+            const tpPct = ((Math.abs(tpPrice - price) / price) * 100).toFixed(2);
+            const slPct = ((Math.abs(slPrice - price) / price) * 100).toFixed(2);
+            const now = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+            const ticker = symbol.replace('USDT', '');
+
+            return `⚠️ <b>PRÉ-ALERTA — ${symbol} (1H)</b>
+
+${dir}
+📅 ${now}
+
+📌 <b>Setup:</b> ${setupLbl}
+📊 <b>Estrutura:</b> ${trendLbl}
+🔄 <b>Retração:</b> ${retracePct}% do impulso
+📉 <b>IFR(14):</b> ${rsiVal.toFixed(1)} — revertendo
+
+⚠️ <b>EMA21 ainda não confirmada.</b> Aguarde o preço cruzar a EMA21 para entrada confirmada, ou entre com gestão reduzida.
+
+💵 <b>Ref. Entrada:</b> ${price.toFixed(6)} USDT
+🎯 <b>Ref. TP:</b> ${tpPrice.toFixed(6)} USDT (+${tpPct}%)
+🛡 <b>Ref. SL:</b> ${slPrice.toFixed(6)} USDT (-${slPct}%)
+💰 <b>Banca:</b> ${POSITION_SIZE}% ($${entrada.toFixed(2)})
+
+📊 <b>Candle:</b> ${candlePat || 'Nenhum'}
+
+#Bybit #PreAlerta #${ticker}`;
+        }
+
         function playAlert(isLong) {
             try {
                 const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -480,9 +532,12 @@ ${dir}
             } catch (e) { }
         }
 
-        function showSignalCard(isLong, symbol, price, rsi, tpPrice, slPrice, candleLabel) {
+        function showSignalCard(isLong, symbol, price, rsi, tpPrice, slPrice, candleLabel, watchlist) {
             const card = document.getElementById('signal-card');
-            card.className = 'signal-card ' + (isLong ? 'long' : 'short');
+            const dirClass = watchlist
+                ? (isLong ? 'watchlist-long' : 'watchlist-short')
+                : (isLong ? 'long' : 'short');
+            card.className = 'signal-card ' + dirClass;
             card.style.display = 'block';
 
             const bankInput = document.getElementById('bankValue').value;
@@ -491,8 +546,9 @@ ${dir}
             const tpPct = ((Math.abs(tpPrice - price) / price) * 100).toFixed(2);
             const slPct = ((Math.abs(slPrice - price) / price) * 100).toFixed(2);
 
-            document.getElementById('signal-title').textContent =
-                isLong ? '🟢 LONG — Buscar Entrada de Compra' : '🔴 SHORT — Buscar Entrada de Venda';
+            document.getElementById('signal-title').textContent = watchlist
+                ? (isLong ? '🟡 PRÉ-ALERTA LONG — Aguardar EMA21' : '🟡 PRÉ-ALERTA SHORT — Aguardar EMA21')
+                : (isLong ? '🟢 LONG — Buscar Entrada de Compra' : '🔴 SHORT — Buscar Entrada de Venda');
             document.getElementById('sig-symbol').textContent = symbol;
             document.getElementById('sig-trend').textContent = isLong
                 ? '📈 Reversão Bullish — IFR Extremo'
@@ -697,6 +753,40 @@ ${dir}
                 };
             }
 
+            // ── PRÉ-ALERTA LONG (HH/HL válido, mas preço abaixo da EMA21) ──
+            if (isHHHL && prevRsi <= RSI_OVERSOLD && lastRsi > prevRsi && bullishReversal) {
+                const slPrice = cur.low;
+                const risk = cur.close - slPrice;
+                if (risk > 0) {
+                    const rrTP = cur.close + 2 * risk;
+                    const tpPrice = bbUpper > cur.close ? Math.max(bbUpper, rrTP) : rrTP;
+                    return {
+                        isLong: true, watchlist: true, price: cur.close, rsi: lastRsi,
+                        tpPrice, slPrice,
+                        candle: `Reversão Bullish — IFR sobrevendido (${prevRsi.toFixed(1)})`,
+                        rsiBonus: true,
+                        retracePct: Math.round(((lastSH.price - cur.close) / Math.max(lastSH.price - lastSL.price, 0.0001)) * 100)
+                    };
+                }
+            }
+
+            // ── PRÉ-ALERTA SHORT (LH/LL válido, mas preço acima da EMA21) ──
+            if (isLHLL && prevRsi >= RSI_OVERBOUGHT && lastRsi < prevRsi && bearishReversal) {
+                const slPrice = cur.high;
+                const risk = slPrice - cur.close;
+                if (risk > 0) {
+                    const rrTP = cur.close - 2 * risk;
+                    const tpPrice = bbLower < cur.close ? Math.min(bbLower, rrTP) : rrTP;
+                    return {
+                        isLong: false, watchlist: true, price: cur.close, rsi: lastRsi,
+                        tpPrice, slPrice,
+                        candle: `Reversão Bearish — IFR sobrecomprado (${prevRsi.toFixed(1)})`,
+                        rsiBonus: true,
+                        retracePct: Math.round(((cur.close - lastSL.price) / Math.max(lastSH.price - lastSL.price, 0.0001)) * 100)
+                    };
+                }
+            }
+
             return {
                 isLong: null, price: cur.close, rsi: lastRsi,
                 reason: `Tendência: ${isUpTrend ? 'alta' : isDownTrend ? 'baixa' : 'indefinida'} | IFR: ${lastRsi.toFixed(1)}`
@@ -779,22 +869,33 @@ ${dir}
 
                     if (result.isLong === true || result.isLong === false) {
                         const dir = result.isLong ? 'LONG 🟢' : 'SHORT 🔴';
-                        const setupLbl = result.isLong ? 'Reversão Bullish' : 'Reversão Bearish';
                         const trendLbl = result.isLong ? 'Tendência Alta' : 'Tendência Baixa';
-                        const bonusLbl = ` | Vela de Ouro confirmada`;
-                        log(`🚀 ${symbol} — ${dir} | IFR Extremo | ${trendLbl} | ${setupLbl} | ${result.candle} | TP: ${result.tpPrice.toFixed(6)} | SL: ${result.slPrice.toFixed(6)}`);
-                        showSignalCard(result.isLong, symbol, result.price, result.rsi, result.tpPrice, result.slPrice, result.candle);
-                        playAlert(result.isLong);
-                        window.open(`https://www.bybit.com/trade/usdt/${symbol}`, '_blank');
                         lastSignalTimestamps[symbol] = currentTs;
                         found++;
 
                         const bankInput = document.getElementById('bankValue').value;
                         const bank = (bankInput && Number(bankInput) > 0) ? Number(bankInput) : 100;
-                        const tgMsg = buildTelegramMsg(result.isLong, symbol, result.price, result.rsi, result.tpPrice, result.slPrice, result.candle, result.rsiBonus, result.retracePct, bank);
-                        sendTelegram(tgMsg)
-                            .then(() => log(`📬 Sinal de ${symbol} enviado para o Telegram!`))
-                            .catch(err => log(`⚠️ Telegram erro (${symbol}): ${err.message}`));
+
+                        const bybitUrl = `https://www.bybit.com/trade/usdt/${symbol}`;
+                        const symLink = `<a href="${bybitUrl}" target="_blank">${symbol}</a>`;
+
+                        if (result.watchlist) {
+                            log(`🟡 ${symLink} — PRÉ-ALERTA ${dir} | ${trendLbl} válida | EMA21 não confirmada | ${result.candle} | TP: ${result.tpPrice.toFixed(6)} | SL: ${result.slPrice.toFixed(6)}`);
+                            showSignalCard(result.isLong, symbol, result.price, result.rsi, result.tpPrice, result.slPrice, result.candle, true);
+                            const tgWatchMsg = buildTelegramWatchlistMsg(result.isLong, symbol, result.price, result.rsi, result.tpPrice, result.slPrice, result.candle, result.retracePct, bank);
+                            sendTelegram(tgWatchMsg)
+                                .then(() => log(`📬 Pré-alerta de ${symLink} enviado para o Telegram!`))
+                                .catch(err => log(`⚠️ Telegram erro (${symbol}): ${err.message}`));
+                        } else {
+                            const setupLbl = result.isLong ? 'Reversão Bullish' : 'Reversão Bearish';
+                            log(`🚀 ${symLink} — ${dir} | IFR Extremo | ${trendLbl} | ${setupLbl} | ${result.candle} | TP: ${result.tpPrice.toFixed(6)} | SL: ${result.slPrice.toFixed(6)}`);
+                            showSignalCard(result.isLong, symbol, result.price, result.rsi, result.tpPrice, result.slPrice, result.candle, false);
+                            playAlert(result.isLong);
+                            const tgMsg = buildTelegramMsg(result.isLong, symbol, result.price, result.rsi, result.tpPrice, result.slPrice, result.candle, result.rsiBonus, result.retracePct, bank);
+                            sendTelegram(tgMsg)
+                                .then(() => log(`📬 Sinal de ${symLink} enviado para o Telegram!`))
+                                .catch(err => log(`⚠️ Telegram erro (${symbol}): ${err.message}`));
+                        }
                     }
 
                     await delay(SCAN_DELAY_MS);
