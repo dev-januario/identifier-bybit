@@ -366,6 +366,9 @@
         const EMA_FILTER_PERIOD = 21;    // EMA21 — filtro secundário de tendência
         const MAX_LEVERAGE = 15;
         const POSITION_SIZE = 50;
+        const MIN_IMPULSE_PCT = 0.025;   // impulso mínimo de 2,5% para sinal válido
+        const MAX_PULLBACK_CANDLES = 20; // pullback deve ter no máx 20 candles desde o swing
+        const SWING_LOOKBACK = 5;        // swing points com 5 candles de confirmação em cada lado
         const checkInterval = 15 * 60 * 1000; // verifica a cada 15 min (candle 1H)
         const SCAN_DELAY_MS = 200;            // pausa entre requisições (ms)
 
@@ -624,13 +627,13 @@ ${dir}
             const cur = candles[candles.length - 1]; // candle atual (fechado)
             const prev = candles[candles.length - 2]; // candle anterior
 
-            // Janela de trabalho: últimos 60 candles para detecção de swings
-            const wCandles = candles.slice(-60);
+            // Janela de trabalho: últimos 100 candles para detecção de swings
+            const wCandles = candles.slice(-100);
             const wHighs = wCandles.map(c => c.high);
             const wLows = wCandles.map(c => c.low);
 
             // ── Swing points ──
-            const { swingHighs, swingLows } = findSwings(wHighs, wLows, 3);
+            const { swingHighs, swingLows } = findSwings(wHighs, wLows, SWING_LOOKBACK);
             if (swingHighs.length < 2 || swingLows.length < 2) return null;
 
             const lastSH = swingHighs[swingHighs.length - 1]; // swing high mais recente
@@ -666,9 +669,13 @@ ${dir}
                 const impulseLeg = impulseHigh - impulseLow;
                 if (impulseLeg <= 0) return null;
 
+                // Impulso mínimo de MIN_IMPULSE_PCT para evitar mercados em range
+                if (impulseLeg / impulseLow < MIN_IMPULSE_PCT) return null;
+
                 // Candles do pullback: entre o swing high e o candle atual (exclusive)
                 const afterSH = wCandles.slice(lastSH.index + 1, -1);
                 if (afterSH.length < 1) return { isLong: null, rsi: lastRsi, reason: 'Aguardando pullback' };
+                if (afterSH.length > MAX_PULLBACK_CANDLES) return { isLong: null, rsi: lastRsi, reason: 'Pullback antigo — aguardando novo impulso' };
 
                 const pullbackLow = Math.min(...afterSH.map(c => c.low));
                 const retrace = (impulseHigh - pullbackLow) / impulseLeg;
@@ -704,9 +711,13 @@ ${dir}
                 const impulseLeg = impulseHigh - impulseLow;
                 if (impulseLeg <= 0) return null;
 
+                // Impulso mínimo de MIN_IMPULSE_PCT para evitar mercados em range
+                if (impulseLeg / impulseHigh < MIN_IMPULSE_PCT) return null;
+
                 // Candles do pullback: entre o swing low e o candle atual (exclusive)
                 const afterSL = wCandles.slice(lastSL.index + 1, -1);
                 if (afterSL.length < 1) return { isLong: null, rsi: lastRsi, reason: 'Aguardando pullback' };
+                if (afterSL.length > MAX_PULLBACK_CANDLES) return { isLong: null, rsi: lastRsi, reason: 'Pullback antigo — aguardando novo impulso' };
 
                 const pullbackHigh = Math.max(...afterSL.map(c => c.high));
                 const retrace = (pullbackHigh - impulseLow) / impulseLeg;
