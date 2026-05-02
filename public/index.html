@@ -322,7 +322,7 @@
 <body>
     <div class="container">
         <h1>� Multi-Ativos — Bot Bybit</h1>
-        <h2>Reversão IFR Extremo contra Tendência — Todos os Ativos USDT (1H)</h2>
+        <h2>Reversão BB %B Extremo contra Tendência — Todos os Ativos USDT (1H)</h2>
 
         <div class="status">
             <strong>Status:</strong> <span id="status">Inicializando...</span>
@@ -338,7 +338,7 @@
                 <div class="signal-item"><span>Banca sugerida</span><strong id="sig-size">50%</strong></div>
                 <div class="signal-item"><span>Take Profit</span><strong id="sig-tp">—</strong></div>
                 <div class="signal-item"><span>Stop Loss</span><strong id="sig-sl">—</strong></div>
-                <div class="signal-item"><span>IFR (14)</span><strong id="sig-rsi">—</strong></div>
+                <div class="signal-item"><span>BB %B (20,2)</span><strong id="sig-rsi">—</strong></div>
                 <div class="signal-item"><span>Candle</span><strong id="sig-candle">—</strong></div>
             </div>
         </div>
@@ -378,12 +378,11 @@
         const INTERVAL = '60';           // gráfico de 1 hora
         const BB_PERIOD = 20;            // Bollinger Bands — também define TP/SL
         const BB_STD = 2;
-        const RSI_PERIOD = 14;
         const EMA_FILTER_PERIOD = 21;    // EMA21 — filtro secundário de tendência
         const MAX_LEVERAGE = 15;
         const POSITION_SIZE = 50;
-        const RSI_OVERBOUGHT = 60;       // IFR sobrecomprado — gatilho SHORT contra downtrend
-        const RSI_OVERSOLD = 40;         // IFR sobrevendido — gatilho LONG contra uptrend
+        const BBP_OVERBOUGHT = 1.00;     // BB %B sobrecomprado — gatilho SHORT contra downtrend
+        const BBP_OVERSOLD = 0.00;       // BB %B sobrevendido — gatilho LONG contra uptrend
         const SWING_LOOKBACK = 5;        // swing points com 5 candles de confirmação em cada lado
         const checkInterval = 15 * 60 * 1000; // verifica a cada 15 min (candle 1H)
         const SCAN_DELAY_MS = 200;            // pausa entre requisições (ms)
@@ -441,11 +440,11 @@
             const dir = isLong ? '🟢 LONG (COMPRA)' : '🔴 SHORT (VENDA)';
             const trendLbl = isLong ? '📈 Alta — HH/HL + preço acima da EMA21' : '📉 Baixa — LH/LL + preço abaixo da EMA21';
             const setupLbl = isLong
-                ? 'Reversão Bullish — IFR sobrevendido contra a tendência de alta'
-                : 'Reversão Bearish — IFR sobrecomprado contra a tendência de baixa';
+                ? 'Reversão Bullish — BB %B sobrevendido contra a tendência de alta'
+                : 'Reversão Bearish — BB %B sobrecomprado contra a tendência de baixa';
             const rsiLbl = isLong
-                ? `IFR(14) revertendo da sobrevenda (${rsiVal.toFixed(1)})`
-                : `IFR(14) revertendo da sobrecompra (${rsiVal.toFixed(1)})`;
+                ? `BB %B revertendo da sobrevenda (${rsiVal.toFixed(2)})`
+                : `BB %B revertendo da sobrecompra (${rsiVal.toFixed(2)})`;
             const bonusLbl = '✅ Vela de reversão de OURO confirmada';
             const bbTpLabel = isLong ? 'BB Superior (20,2) / RR 2:1' : 'BB Inferior (20,2) / RR 2:1';
             const bbSlLabel = isLong ? 'Fundo da vela de reversão' : 'Topo da vela de reversão';
@@ -455,7 +454,7 @@
             const now = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
             const ticker = symbol.replace('USDT', '');
 
-            return `🚨 <b>REVERSÃO IFR EXTREMO — ${symbol} (1H)</b>
+            return `🚨 <b>REVERSÃO BB %B EXTREMO — ${symbol} (1H)</b>
 
 ${dir}
 📅 ${now}
@@ -463,7 +462,7 @@ ${dir}
 📌 <b>Setup:</b> ${setupLbl}
 📊 <b>Tendência:</b> ${trendLbl}
 🔄 <b>Retração:</b> ${retracePct}% do impulso
-📉 <b>IFR(14):</b> ${rsiLbl}
+📉 <b>BB %B (20,2):</b> ${rsiLbl}
 📊 <b>Bônus:</b> ${bonusLbl}
 
 💵 <b>Entrada:</b> ${price.toFixed(6)} USDT
@@ -474,7 +473,7 @@ ${dir}
 
 📊 <b>Padrão de candle:</b> ${candlePat || 'Nenhum'}
 
-#Bybit #ReversaoIFR #${ticker}`;
+#Bybit #ReversaoBBPercent #${ticker}`;
         }
 
         function buildTelegramWatchlistMsg(isLong, symbol, price, rsiVal, tpPrice, slPrice, candlePat, retracePct, bankValue) {
@@ -483,8 +482,8 @@ ${dir}
                 ? '📈 Estrutura Alta (HH/HL) confirmada — preço ainda abaixo da EMA21'
                 : '📉 Estrutura Baixa (LH/LL) confirmada — preço ainda acima da EMA21';
             const setupLbl = isLong
-                ? 'Reversão Bullish potencial — IFR sobrevendido + vela de reversão'
-                : 'Reversão Bearish potencial — IFR sobrecomprado + vela de reversão';
+                ? 'Reversão Bullish potencial — BB %B sobrevendido + vela de reversão'
+                : 'Reversão Bearish potencial — BB %B sobrecomprado + vela de reversão';
             const entrada = bankValue * (POSITION_SIZE / 100);
             const tpPct = ((Math.abs(tpPrice - price) / price) * 100).toFixed(2);
             const slPct = ((Math.abs(slPrice - price) / price) * 100).toFixed(2);
@@ -499,7 +498,7 @@ ${dir}
 📌 <b>Setup:</b> ${setupLbl}
 📊 <b>Estrutura:</b> ${trendLbl}
 🔄 <b>Retração:</b> ${retracePct}% do impulso
-📉 <b>IFR(14):</b> ${rsiVal.toFixed(1)} — revertendo
+📉 <b>BB %B (20,2):</b> ${rsiVal.toFixed(2)} — revertendo
 
 ⚠️ <b>EMA21 ainda não confirmada.</b> Aguarde o preço cruzar a EMA21 para entrada confirmada, ou entre com gestão reduzida.
 
@@ -551,8 +550,8 @@ ${dir}
                 : (isLong ? '🟢 LONG — Buscar Entrada de Compra' : '🔴 SHORT — Buscar Entrada de Venda');
             document.getElementById('sig-symbol').textContent = symbol;
             document.getElementById('sig-trend').textContent = isLong
-                ? '📈 Reversão Bullish — IFR Extremo'
-                : '📉 Reversão Bearish — IFR Extremo';
+                ? '📈 Reversão Bullish — BB %B Extremo'
+                : '📉 Reversão Bearish — BB %B Extremo';
             document.getElementById('sig-entry').textContent = price.toFixed(6);
             document.getElementById('sig-leverage').textContent = MAX_LEVERAGE + 'x';
             document.getElementById('sig-size').textContent = POSITION_SIZE + '%  ($' + entrada.toFixed(2) + ')';
@@ -593,23 +592,7 @@ ${dir}
             return { upper, middle, lower };
         }
 
-        function rsi(closes, period) {
-            const gains = [], losses = [];
-            for (let i = 1; i < closes.length; i++) {
-                const d = closes[i] - closes[i - 1];
-                gains.push(d > 0 ? d : 0);
-                losses.push(d < 0 ? -d : 0);
-            }
-            let avgG = gains.slice(0, period).reduce((a, b) => a + b, 0) / period;
-            let avgL = losses.slice(0, period).reduce((a, b) => a + b, 0) / period;
-            const vals = [avgL === 0 ? 100 : 100 - 100 / (1 + avgG / avgL)];
-            for (let i = period; i < gains.length; i++) {
-                avgG = (avgG * (period - 1) + gains[i]) / period;
-                avgL = (avgL * (period - 1) + losses[i]) / period;
-                vals.push(avgL === 0 ? 100 : 100 - 100 / (1 + avgG / avgL));
-            }
-            return vals;
-        }
+
 
         function candlePattern(candles) {
             const c = candles[candles.length - 1];
@@ -693,13 +676,17 @@ ${dir}
             const isUpTrend = isHHHL && cur.close > lastEma21;
             const isDownTrend = isLHLL && cur.close < lastEma21;
 
-            // ── Bollinger Bands (TP) e RSI ──
+            // ── Bollinger Bands (TP) e BB %B ──
             const bb = bollingerBands(closes, BB_PERIOD, BB_STD);
             const bbUpper = bb.upper[bb.upper.length - 1];
             const bbLower = bb.lower[bb.lower.length - 1];
-            const rsiArr = rsi(closes, RSI_PERIOD);
-            const lastRsi = rsiArr[rsiArr.length - 1];     // RSI do cur (fechado)
-            const prevRsi = rsiArr.length > 1 ? rsiArr[rsiArr.length - 2] : lastRsi; // RSI do prev
+            // BB %B = (Close - Lower) / (Upper - Lower)
+            const bbpArr = bb.upper.map((u, i) => {
+                const range = u - bb.lower[i];
+                return range === 0 ? 0.5 : (closes[i + BB_PERIOD - 1] - bb.lower[i]) / range;
+            });
+            const lastBBP = bbpArr[bbpArr.length - 1];     // BB %B do cur (fechado)
+            const prevBBP = bbpArr.length > 1 ? bbpArr[bbpArr.length - 2] : lastBBP; // BB %B do prev
 
             // ── Velas de PRATA e OURO ────────────────────────────────────────────
             const curBody = Math.abs(cur.close - cur.open);
@@ -730,49 +717,49 @@ ${dir}
                 (curBody > prevBody || curRange > prevRange);
 
             // ── SINAL SHORT (confirmado — EMA21 + Vela de OURO) ─────────────────
-            if (isDownTrend && prevRsi >= RSI_OVERBOUGHT && lastRsi < prevRsi && bearishGold) {
+            if (isDownTrend && prevBBP >= BBP_OVERBOUGHT && lastBBP < prevBBP && bearishGold) {
                 const slPrice = cur.high;
                 const risk = slPrice - cur.close;
                 if (risk <= 0) return null;
                 const rrTP = cur.close - 2 * risk;
                 const tpPrice = bbLower < cur.close ? Math.min(bbLower, rrTP) : rrTP;
                 return {
-                    isLong: false, price: cur.close, rsi: lastRsi,
+                    isLong: false, price: cur.close, rsi: lastBBP,
                     tpPrice, slPrice,
-                    candle: `🥇 Vela de OURO Bearish — IFR sobrecomprado (${prevRsi.toFixed(1)})`,
+                    candle: `🥇 Vela de OURO Bearish — BB %B sobrecomprado (${prevBBP.toFixed(2)})`,
                     rsiBonus: true,
                     retracePct: Math.round(((cur.close - lastSL.price) / Math.max(lastSH.price - lastSL.price, 0.0001)) * 100)
                 };
             }
 
             // ── SINAL LONG (confirmado — EMA21 + Vela de OURO) ──────────────────
-            if (isUpTrend && prevRsi <= RSI_OVERSOLD && lastRsi > prevRsi && bullishGold) {
+            if (isUpTrend && prevBBP <= BBP_OVERSOLD && lastBBP > prevBBP && bullishGold) {
                 const slPrice = cur.low;
                 const risk = cur.close - slPrice;
                 if (risk <= 0) return null;
                 const rrTP = cur.close + 2 * risk;
                 const tpPrice = bbUpper > cur.close ? Math.max(bbUpper, rrTP) : rrTP;
                 return {
-                    isLong: true, price: cur.close, rsi: lastRsi,
+                    isLong: true, price: cur.close, rsi: lastBBP,
                     tpPrice, slPrice,
-                    candle: `🥇 Vela de OURO Bullish — IFR sobrevendido (${prevRsi.toFixed(1)})`,
+                    candle: `🥇 Vela de OURO Bullish — BB %B sobrevendido (${prevBBP.toFixed(2)})`,
                     rsiBonus: true,
                     retracePct: Math.round(((lastSH.price - cur.close) / Math.max(lastSH.price - lastSL.price, 0.0001)) * 100)
                 };
             }
 
             // ── PRÉ-ALERTA LONG (HH/HL válido, EMA21 não confirmada — Ouro ou Prata) ──
-            if (isHHHL && prevRsi <= RSI_OVERSOLD && lastRsi > prevRsi && bullishSilver) {
+            if (isHHHL && prevBBP <= BBP_OVERSOLD && lastBBP > prevBBP && bullishSilver) {
                 const slPrice = cur.low;
                 const risk = cur.close - slPrice;
                 if (risk > 0) {
                     const rrTP = cur.close + 2 * risk;
                     const tpPrice = bbUpper > cur.close ? Math.max(bbUpper, rrTP) : rrTP;
                     const candleLabel = bullishGold
-                        ? `🥇 Vela de OURO Bullish — IFR sobrevendido (${prevRsi.toFixed(1)})`
-                        : `🥈 Vela de PRATA Bullish — IFR sobrevendido (${prevRsi.toFixed(1)})`;
+                        ? `🥇 Vela de OURO Bullish — BB %B sobrevendido (${prevBBP.toFixed(2)})`
+                        : `🥈 Vela de PRATA Bullish — BB %B sobrevendido (${prevBBP.toFixed(2)})`;
                     return {
-                        isLong: true, watchlist: true, price: cur.close, rsi: lastRsi,
+                        isLong: true, watchlist: true, price: cur.close, rsi: lastBBP,
                         tpPrice, slPrice,
                         candle: candleLabel,
                         rsiBonus: true,
@@ -782,17 +769,17 @@ ${dir}
             }
 
             // ── PRÉ-ALERTA SHORT (LH/LL válido, EMA21 não confirmada — Ouro ou Prata) ──
-            if (isLHLL && prevRsi >= RSI_OVERBOUGHT && lastRsi < prevRsi && bearishSilver) {
+            if (isLHLL && prevBBP >= BBP_OVERBOUGHT && lastBBP < prevBBP && bearishSilver) {
                 const slPrice = cur.high;
                 const risk = slPrice - cur.close;
                 if (risk > 0) {
                     const rrTP = cur.close - 2 * risk;
                     const tpPrice = bbLower < cur.close ? Math.min(bbLower, rrTP) : rrTP;
                     const candleLabel = bearishGold
-                        ? `🥇 Vela de OURO Bearish — IFR sobrecomprado (${prevRsi.toFixed(1)})`
-                        : `🥈 Vela de PRATA Bearish — IFR sobrecomprado (${prevRsi.toFixed(1)})`;
+                        ? `🥇 Vela de OURO Bearish — BB %B sobrecomprado (${prevBBP.toFixed(2)})`
+                        : `🥈 Vela de PRATA Bearish — BB %B sobrecomprado (${prevBBP.toFixed(2)})`;
                     return {
-                        isLong: false, watchlist: true, price: cur.close, rsi: lastRsi,
+                        isLong: false, watchlist: true, price: cur.close, rsi: lastBBP,
                         tpPrice, slPrice,
                         candle: candleLabel,
                         rsiBonus: true,
@@ -802,8 +789,8 @@ ${dir}
             }
 
             return {
-                isLong: null, price: cur.close, rsi: lastRsi,
-                reason: `Tendência: ${isUpTrend ? 'alta' : isDownTrend ? 'baixa' : 'indefinida'} | IFR: ${lastRsi.toFixed(1)}`
+                isLong: null, price: cur.close, rsi: lastBBP,
+                reason: `Tendência: ${isUpTrend ? 'alta' : isDownTrend ? 'baixa' : 'indefinida'} | BB %B: ${lastBBP.toFixed(2)}`
             };
         }
 
@@ -937,7 +924,7 @@ ${dir}
             localStorage.setItem('botRunning', '1');
             setBtnState(true);
             updateStatus('🟢 Ativo — iniciando varredura...');
-            log('▶️ Bot iniciado! Monitorando todos os ativos USDT (1H) — Reversão IFR Extremo Strategy.');
+            log('▶️ Bot iniciado! Monitorando todos os ativos USDT (1H) — Reversão BB %B Extremo Strategy.');
             checkSignal();
             botInterval = setInterval(checkSignal, checkInterval);
             showSnackbar('Bot iniciado!');
@@ -977,9 +964,9 @@ ${dir}
                 else localStorage.removeItem('bankValue');
             });
 
-            log('📊 Bot carregado. Estratégia: Reversão IFR Extremo — LH/LL ou HH/HL + EMA21 + IFR ≥60/≤40 + Vela de OURO (1H)');
-            log('ℹ️  LONG : Tendência Alta (HH/HL) | IFR ≤ 40 no pullback | Vela verde engolfa vermelha + pavio inferior');
-            log('ℹ️  SHORT: Tendência Baixa (LH/LL) | IFR ≥ 60 no pullback | Vela vermelha engolfa verde + pavio superior');
+            log('📊 Bot carregado. Estratégia: Reversão BB %B Extremo — LH/LL ou HH/HL + EMA21 + BB %B ≥1,00/≤0,00 + Vela de OURO (1H)');
+            log('ℹ️  LONG : Tendência Alta (HH/HL) | BB %B ≤ 0,00 no pullback | Vela verde engolfa vermelha + pavio inferior');
+            log('ℹ️  SHORT: Tendência Baixa (LH/LL) | BB %B ≥ 1,00 no pullback | Vela vermelha engolfa verde + pavio superior');
             log('📐 TP = BB oposta / RR 2:1 | SL = Topo/Fundo da vela de reversão');
 
             // Retoma bot automaticamente se estava ativo antes de sair da página
