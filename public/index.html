@@ -245,6 +245,16 @@
             border-color: #F5A623;
         }
 
+        #signal-card.smc-long {
+            background: #0D1827;
+            border-color: #4A90E2;
+        }
+
+        #signal-card.smc-short {
+            background: #1B0D27;
+            border-color: #9B59B6;
+        }
+
         @keyframes pulse {
             0% {
                 transform: scale(1);
@@ -512,6 +522,36 @@ ${dir}
 #Bybit #PreAlerta #${ticker}`;
         }
 
+        function buildTelegramSmcMsg(isLong, symbol, price, bbpVal, tpPrice, slPrice, candlePat, retracePct, bankValue) {
+            const dir = isLong ? '🟢 LONG (COMPRA)' : '🔴 SHORT (VENDA)';
+            const trendLbl = isLong ? '📈 Alta — HH/HL + preço acima da EMA21' : '📉 Baixa — LH/LL + preço abaixo da EMA21';
+            const entrada = bankValue * (POSITION_SIZE / 100);
+            const tpPct = ((Math.abs(tpPrice - price) / price) * 100).toFixed(2);
+            const slPct = ((Math.abs(slPrice - price) / price) * 100).toFixed(2);
+            const now = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+            const ticker = symbol.replace('USDT', '');
+
+            return `🏛️ <b>SMC — ORDER BLOCK — ${symbol} (1H)</b>
+
+${dir}
+📅 ${now}
+
+📌 <b>Setup:</b> Retorno ao Order Block após BOS Interno
+📊 <b>Tendência:</b> ${trendLbl}
+🔄 <b>Retração:</b> ${retracePct}% do impulso
+📉 <b>BB %B (20,2):</b> ${bbpVal.toFixed(2)}
+
+💵 <b>Entrada:</b> ${price.toFixed(6)} USDT
+🎯 <b>TP:</b> ${tpPrice.toFixed(6)} USDT (+${tpPct}%)
+🛡 <b>SL:</b> ${slPrice.toFixed(6)} USDT (-${slPct}%) — Base do OB
+💰 <b>Banca:</b> ${POSITION_SIZE}% ($${entrada.toFixed(2)})
+⚖️ <b>Alavancagem sugerida:</b> até ${MAX_LEVERAGE}x
+
+📊 <b>Candle:</b> ${candlePat || 'Nenhum'}
+
+#Bybit #SMC #OrderBlock #${ticker}`;
+        }
+
         function playAlert(isLong) {
             try {
                 const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -531,11 +571,13 @@ ${dir}
             } catch (e) { }
         }
 
-        function showSignalCard(isLong, symbol, price, rsi, tpPrice, slPrice, candleLabel, watchlist) {
+        function showSignalCard(isLong, symbol, price, rsi, tpPrice, slPrice, candleLabel, watchlist, smcOB = false) {
             const card = document.getElementById('signal-card');
-            const dirClass = watchlist
-                ? (isLong ? 'watchlist-long' : 'watchlist-short')
-                : (isLong ? 'long' : 'short');
+            const dirClass = smcOB
+                ? (isLong ? 'smc-long' : 'smc-short')
+                : watchlist
+                    ? (isLong ? 'watchlist-long' : 'watchlist-short')
+                    : (isLong ? 'long' : 'short');
             card.className = 'signal-card ' + dirClass;
             card.style.display = 'block';
 
@@ -545,9 +587,11 @@ ${dir}
             const tpPct = ((Math.abs(tpPrice - price) / price) * 100).toFixed(2);
             const slPct = ((Math.abs(slPrice - price) / price) * 100).toFixed(2);
 
-            document.getElementById('signal-title').textContent = watchlist
-                ? (isLong ? '🟡 PRÉ-ALERTA LONG — Aguardar EMA21' : '🟡 PRÉ-ALERTA SHORT — Aguardar EMA21')
-                : (isLong ? '🟢 LONG — Buscar Entrada de Compra' : '🔴 SHORT — Buscar Entrada de Venda');
+            document.getElementById('signal-title').textContent = smcOB
+                ? (isLong ? '🏛️ SMC OB LONG — Retorno ao Order Block' : '🏛️ SMC OB SHORT — Retorno ao Order Block')
+                : watchlist
+                    ? (isLong ? '🟡 PRÉ-ALERTA LONG — Aguardar EMA21' : '🟡 PRÉ-ALERTA SHORT — Aguardar EMA21')
+                    : (isLong ? '🟢 LONG — Buscar Entrada de Compra' : '🔴 SHORT — Buscar Entrada de Venda');
             document.getElementById('sig-symbol').textContent = symbol;
             document.getElementById('sig-trend').textContent = isLong
                 ? '📈 Reversão Bullish — BB %B Extremo'
@@ -615,6 +659,25 @@ ${dir}
                 (c.close - c.low) < cBody)
                 return 'Estrela Cadente';
             return null;
+        }
+
+        // ── Order Blocks (SMC) ────────────────────────────────────────────────
+        function findBullishOB(candles, swingLowIdx) {
+            const start = Math.max(0, swingLowIdx - 10);
+            for (let i = swingLowIdx; i >= start; i--) {
+                if (candles[i].close < candles[i].open)
+                    return { high: candles[i].high, low: candles[i].low };
+            }
+            return { high: candles[swingLowIdx].high, low: candles[swingLowIdx].low };
+        }
+
+        function findBearishOB(candles, swingHighIdx) {
+            const start = Math.max(0, swingHighIdx - 10);
+            for (let i = swingHighIdx; i >= start; i--) {
+                if (candles[i].close > candles[i].open)
+                    return { high: candles[i].high, low: candles[i].low };
+            }
+            return { high: candles[swingHighIdx].high, low: candles[swingHighIdx].low };
         }
 
         // ── Pontos de swing (HH / HL / LH / LL) ───────────────────────────────
@@ -716,8 +779,8 @@ ${dir}
                 bearishSilver &&
                 (curBody > prevBody || curRange > prevRange);
 
-            // ── SINAL SHORT (confirmado — EMA21 + Vela de OURO) ─────────────────
-            if (isDownTrend && prevBBP >= BBP_OVERBOUGHT && lastBBP < prevBBP && bearishGold) {
+            // ── SINAL SHORT (confirmado — EMA21 + Vela de OURO ou PRATA) ────────
+            if (isDownTrend && prevBBP >= BBP_OVERBOUGHT && lastBBP < prevBBP && bearishSilver) {
                 const slPrice = cur.high;
                 const risk = slPrice - cur.close;
                 if (risk <= 0) return null;
@@ -726,14 +789,16 @@ ${dir}
                 return {
                     isLong: false, price: cur.close, rsi: lastBBP,
                     tpPrice, slPrice,
-                    candle: `🥇 Vela de OURO Bearish — BB %B sobrecomprado (${prevBBP.toFixed(2)})`,
+                    candle: bearishGold
+                        ? `🥇 Vela de OURO Bearish — BB %B sobrecomprado (${prevBBP.toFixed(2)})`
+                        : `🥈 Vela de PRATA Bearish — BB %B sobrecomprado (${prevBBP.toFixed(2)})`,
                     rsiBonus: true,
                     retracePct: Math.round(((cur.close - lastSL.price) / Math.max(lastSH.price - lastSL.price, 0.0001)) * 100)
                 };
             }
 
-            // ── SINAL LONG (confirmado — EMA21 + Vela de OURO) ──────────────────
-            if (isUpTrend && prevBBP <= BBP_OVERSOLD && lastBBP > prevBBP && bullishGold) {
+            // ── SINAL LONG (confirmado — EMA21 + Vela de OURO ou PRATA) ─────────
+            if (isUpTrend && prevBBP <= BBP_OVERSOLD && lastBBP > prevBBP && bullishSilver) {
                 const slPrice = cur.low;
                 const risk = cur.close - slPrice;
                 if (risk <= 0) return null;
@@ -742,7 +807,9 @@ ${dir}
                 return {
                     isLong: true, price: cur.close, rsi: lastBBP,
                     tpPrice, slPrice,
-                    candle: `🥇 Vela de OURO Bullish — BB %B sobrevendido (${prevBBP.toFixed(2)})`,
+                    candle: bullishGold
+                        ? `🥇 Vela de OURO Bullish — BB %B sobrevendido (${prevBBP.toFixed(2)})`
+                        : `🥈 Vela de PRATA Bullish — BB %B sobrevendido (${prevBBP.toFixed(2)})`,
                     rsiBonus: true,
                     retracePct: Math.round(((lastSH.price - cur.close) / Math.max(lastSH.price - lastSL.price, 0.0001)) * 100)
                 };
@@ -785,6 +852,57 @@ ${dir}
                         rsiBonus: true,
                         retracePct: Math.round(((cur.close - lastSL.price) / Math.max(lastSH.price - lastSL.price, 0.0001)) * 100)
                     };
+                }
+            }
+
+            // ── SINAL SMC — Toque em Order Block após BOS Interno ────────────────
+            const { swingHighs: intSH, swingLows: intSL } = findSwings(wHighs, wLows, 3);
+            if (intSH.length >= 1 && intSL.length >= 1) {
+                const lastIntSH = intSH[intSH.length - 1];
+                const lastIntSL = intSL[intSL.length - 1];
+
+                // SMC LONG: HH/HL + EMA21 + OB de demanda + vela de reversão
+                if (isHHHL && cur.close > lastEma21 && bullishSilver) {
+                    const ob = findBullishOB(wCandles, lastIntSL.index);
+                    const margin = ob.high * 0.002;
+                    const touchedOB = cur.low <= ob.high + margin || prev.low <= ob.high + margin;
+                    if (touchedOB && cur.close >= ob.low) {
+                        const slPrice = Math.min(cur.low, ob.low);
+                        const risk = cur.close - slPrice;
+                        if (risk > 0 && risk / cur.close < 0.06) {
+                            const rrTP = cur.close + 2 * risk;
+                            const tpPrice = bbUpper > cur.close ? Math.max(bbUpper, rrTP) : rrTP;
+                            return {
+                                isLong: true, smcOB: true, price: cur.close, rsi: lastBBP,
+                                tpPrice, slPrice,
+                                candle: bullishGold ? `🥇 Vela OURO no OB Bullish` : `🥈 Vela PRATA no OB Bullish`,
+                                rsiBonus: false,
+                                retracePct: Math.round(((lastSH.price - cur.close) / Math.max(lastSH.price - lastSL.price, 0.0001)) * 100)
+                            };
+                        }
+                    }
+                }
+
+                // SMC SHORT: LH/LL + EMA21 abaixo + OB de oferta + vela de reversão
+                if (isLHLL && cur.close < lastEma21 && bearishSilver) {
+                    const ob = findBearishOB(wCandles, lastIntSH.index);
+                    const margin = ob.low * 0.002;
+                    const touchedOB = cur.high >= ob.low - margin || prev.high >= ob.low - margin;
+                    if (touchedOB && cur.close <= ob.high) {
+                        const slPrice = Math.max(cur.high, ob.high);
+                        const risk = slPrice - cur.close;
+                        if (risk > 0 && risk / cur.close < 0.06) {
+                            const rrTP = cur.close - 2 * risk;
+                            const tpPrice = bbLower < cur.close ? Math.min(bbLower, rrTP) : rrTP;
+                            return {
+                                isLong: false, smcOB: true, price: cur.close, rsi: lastBBP,
+                                tpPrice, slPrice,
+                                candle: bearishGold ? `🥇 Vela OURO no OB Bearish` : `🥈 Vela PRATA no OB Bearish`,
+                                rsiBonus: false,
+                                retracePct: Math.round(((cur.close - lastSL.price) / Math.max(lastSH.price - lastSL.price, 0.0001)) * 100)
+                            };
+                        }
+                    }
                 }
             }
 
@@ -879,7 +997,16 @@ ${dir}
                         const bybitUrl = `https://www.bybit.com/trade/usdt/${symbol}`;
                         const symLink = `<a href="${bybitUrl}" target="_blank">${symbol}</a>`;
 
-                        if (result.watchlist) {
+                        if (result.smcOB) {
+                            const smcDir = result.isLong ? 'OB LONG 🏛️🟢' : 'OB SHORT 🏛️🔴';
+                            log(`🏛️ ${symLink} — SMC ${smcDir} | ${trendLbl} | ${result.candle} | BB %B: ${result.rsi.toFixed(2)} | TP: ${result.tpPrice.toFixed(6)} | SL: ${result.slPrice.toFixed(6)}`);
+                            showSignalCard(result.isLong, symbol, result.price, result.rsi, result.tpPrice, result.slPrice, result.candle, false, true);
+                            playAlert(result.isLong);
+                            const tgSmcMsg = buildTelegramSmcMsg(result.isLong, symbol, result.price, result.rsi, result.tpPrice, result.slPrice, result.candle, result.retracePct, bank);
+                            sendTelegram(tgSmcMsg)
+                                .then(() => log(`📬 Sinal SMC de ${symLink} enviado para o Telegram!`))
+                                .catch(err => log(`⚠️ Telegram erro (${symbol}): ${err.message}`));
+                        } else if (result.watchlist) {
                             log(`🟡 ${symLink} — PRÉ-ALERTA ${dir} | ${trendLbl} válida | EMA21 não confirmada | ${result.candle} | TP: ${result.tpPrice.toFixed(6)} | SL: ${result.slPrice.toFixed(6)}`);
                             showSignalCard(result.isLong, symbol, result.price, result.rsi, result.tpPrice, result.slPrice, result.candle, true);
                             const tgWatchMsg = buildTelegramWatchlistMsg(result.isLong, symbol, result.price, result.rsi, result.tpPrice, result.slPrice, result.candle, result.retracePct, bank);
@@ -888,7 +1015,7 @@ ${dir}
                                 .catch(err => log(`⚠️ Telegram erro (${symbol}): ${err.message}`));
                         } else {
                             const setupLbl = result.isLong ? 'Reversão Bullish' : 'Reversão Bearish';
-                            log(`🚀 ${symLink} — ${dir} | IFR Extremo | ${trendLbl} | ${setupLbl} | ${result.candle} | TP: ${result.tpPrice.toFixed(6)} | SL: ${result.slPrice.toFixed(6)}`);
+                            log(`🚀 ${symLink} — ${dir} | BB %B Extremo | ${trendLbl} | ${setupLbl} | ${result.candle} | TP: ${result.tpPrice.toFixed(6)} | SL: ${result.slPrice.toFixed(6)}`);
                             showSignalCard(result.isLong, symbol, result.price, result.rsi, result.tpPrice, result.slPrice, result.candle, false);
                             playAlert(result.isLong);
                             const tgMsg = buildTelegramMsg(result.isLong, symbol, result.price, result.rsi, result.tpPrice, result.slPrice, result.candle, result.rsiBonus, result.retracePct, bank);
@@ -964,10 +1091,11 @@ ${dir}
                 else localStorage.removeItem('bankValue');
             });
 
-            log('📊 Bot carregado. Estratégia: Reversão BB %B Extremo — LH/LL ou HH/HL + EMA21 + BB %B ≥1,00/≤0,00 + Vela de OURO (1H)');
-            log('ℹ️  LONG : Tendência Alta (HH/HL) | BB %B ≤ 0,00 no pullback | Vela verde engolfa vermelha + pavio inferior');
-            log('ℹ️  SHORT: Tendência Baixa (LH/LL) | BB %B ≥ 1,00 no pullback | Vela vermelha engolfa verde + pavio superior');
-            log('📐 TP = BB oposta / RR 2:1 | SL = Topo/Fundo da vela de reversão');
+            log('📊 Bot carregado. Estratégias: [1] BB %B Extremo + Vela OURO/PRATA | [2] SMC Order Block + BOS Interno (1H)');
+            log('ℹ️  BB %B LONG : HH/HL + EMA21 + BB %B ≤ 0,00 + Vela OURO ou PRATA | BB %B SHORT: LH/LL + EMA21 + BB %B ≥ 1,00');
+            log('🏛️  SMC LONG  : HH/HL + EMA21 + Toque no OB de Demanda + Vela OURO ou PRATA');
+            log('🏛️  SMC SHORT : LH/LL + EMA21 abaixo + Toque no OB de Oferta + Vela OURO ou PRATA');
+            log('📐 TP = BB oposta / RR 2:1 | SL = Topo/Fundo da vela ou base do OB');
 
             // Retoma bot automaticamente se estava ativo antes de sair da página
             if (localStorage.getItem('botRunning') === '1') {
