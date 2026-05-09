@@ -893,8 +893,9 @@ ${dir}
             // Condição: 1 dos 3 últimos candles tocou OB + BB %B próximo do extremo
             const recentLongTouch = recentTouchOB(bullishOBs, true);
             const recentShortTouch = recentTouchOB(bearishOBs, false);
-            const bbpNearOversold = lastBBP <= 0.15 || prevBBP <= 0.15 || prev2BBP <= 0.15;
-            const bbpNearOverbought = lastBBP >= 0.85 || prevBBP >= 0.85 || prev2BBP >= 0.85;
+            // BB %B verificado apenas no candle atual: "tocou no OB E o BB %B está no extremo agora"
+            const bbpNearOversold = lastBBP <= 0.15;
+            const bbpNearOverbought = lastBBP >= 0.85;
 
             // ── ALERTA FORTE ─────────────────────────────────────────────────────
             // Todos os 5 confirmam: OB (candle atual) + BB %B extremo revertendo
@@ -943,7 +944,9 @@ ${dir}
             }
 
             // PRÉ-ALERTA — LONG
-            if (recentLongTouch && bbpNearOversold) {
+            // Exige: toque no OB bullish + BB %B próximo da sobrevenda + vela de ouro/prata
+            // Rejeita se o preço também tocou OB bearish (conflito de zona)
+            if (recentLongTouch && bbpNearOversold && !recentShortTouch && hasReversalCandle(true)) {
                 const slPrice = cur.low;
                 const risk = cur.close - slPrice;
                 if (risk > 0) {
@@ -954,14 +957,16 @@ ${dir}
                         : 0;
                     return {
                         isLong: true, watchlist: true, price: cur.close, rsi: lastBBP, tpPrice, slPrice,
-                        candle: `BB %B: ${lastBBP.toFixed(2)} — próximo da sobrevenda 🟦OB`,
+                        candle: `${candleLabel(true)} 🟦OB | BB %B: ${lastBBP.toFixed(2)}`,
                         rsiBonus: false, retracePct
                     };
                 }
             }
 
             // PRÉ-ALERTA — SHORT
-            if (recentShortTouch && bbpNearOverbought) {
+            // Exige: toque no OB bearish + BB %B próximo da sobrecompra + vela de ouro/prata
+            // Rejeita se o preço também tocou OB bullish (conflito de zona)
+            if (recentShortTouch && bbpNearOverbought && !recentLongTouch && hasReversalCandle(false)) {
                 const slPrice = cur.high;
                 const risk = slPrice - cur.close;
                 if (risk > 0) {
@@ -972,7 +977,7 @@ ${dir}
                         : 0;
                     return {
                         isLong: false, watchlist: true, price: cur.close, rsi: lastBBP, tpPrice, slPrice,
-                        candle: `BB %B: ${lastBBP.toFixed(2)} — próximo da sobrecompra 🟥OB`,
+                        candle: `${candleLabel(false)} 🟥OB | BB %B: ${lastBBP.toFixed(2)}`,
                         rsiBonus: false, retracePct
                     };
                 }
@@ -1161,7 +1166,7 @@ ${dir}
             });
 
             log('📊 Bot carregado — OB + BB %B + Vela + Swing + Golden Pocket');
-            log('🟡 PRÉ-ALERTA  : 1 dos 3 últimos candles tocou OB + BB %B ≤ 0.15 (long) ou ≥ 0.85 (short)');
+            log('🟡 PRÉ-ALERTA  : toque OB + BB %B ≤ 0.15/≥ 0.85 + Vela Ouro/Prata + sem conflito de OB oposto');
             log('🟢🔴 ALERTA FORTE: candle atual no OB + BB %B extremo revertendo + Vela Ouro/Prata + HH/HL ou LH/LL + Golden Pocket 0.705');
             log('🥇 OURO: range atual > range anterior | 🥈 PRATA: range atual > média dos últimos 3 candles');
             log('📐 TP = BB oposta / RR 2:1 | SL = fundo (long) ou topo (short) do candle de entrada');
