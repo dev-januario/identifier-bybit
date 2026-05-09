@@ -816,46 +816,23 @@ ${dir}
 
             // Exclui o candle live (último) — trabalha apenas com candles fechados
             const closed = candles.slice(0, -1);
-            const wCandles = closed.slice(-150); // janela maior para detectar swings de qualidade
+            const wCandles = closed.slice(-150);
             const n = wCandles.length;
             if (n < 70) return null;
 
-            // ATR e extremos ajustados por volatilidade (Pine Script parsedHighs/parsedLows)
+            // ATR e extremos ajustados por volatilidade
             const atr = calcATR(wCandles, Math.min(50, n - 1));
             const parsed = getParsedExtremes(wCandles, atr);
 
-            // ── Zonas de Supply/Demand (filtro obrigatório de zona) ───────────────
-            // Todos os sinais BB %B e Pré-Alerta só disparam se o preço estiver dentro
-            // de um Order Block ativo não-mitigado (zona vermelha = supply, azul = demand)
+            // Order Blocks ativos (swing com 10 candles de confirmação cada lado)
             const { bullishOBs, bearishOBs } = buildActiveOrderBlocks(wCandles, parsed, 10);
 
-            // Estrutura Swing — 10 candles cada lado (Pine Script swingsLengthInput ≈ 10–15)
-            const { swingHighs, swingLows } = detectPivots(wCandles, 10);
-            // Estrutura Interna — 5 candles cada lado (Pine Script interno fixo em 5)
-            const { swingHighs: intSH, swingLows: intSL } = detectPivots(wCandles, 5);
-
-            if (swingHighs.length < 2 || swingLows.length < 2) return null;
-
-            const lastSH = swingHighs[swingHighs.length - 1];
-            const prev2SH = swingHighs[swingHighs.length - 2];
-            const lastSL = swingLows[swingLows.length - 1];
-            const prev2SL = swingLows[swingLows.length - 2];
-
             const closes = closed.map(c => c.close);
-            const cur = wCandles[n - 1]; // último candle FECHADO
+            const cur = wCandles[n - 1]; // último candle fechado
             const prev = wCandles[n - 2];
+            const prev2 = wCandles[n - 3];
 
-            // EMA21
-            const ema21Arr = ema(closes, EMA_FILTER_PERIOD);
-            const lastEma21 = ema21Arr[ema21Arr.length - 1];
-
-            // Estrutura de mercado
-            const isHHHL = lastSH.price > prev2SH.price && lastSL.price > prev2SL.price;
-            const isLHLL = lastSH.price < prev2SH.price && lastSL.price < prev2SL.price;
-            const isUpTrend = isHHHL && cur.close > lastEma21;
-            const isDownTrend = isLHLL && cur.close < lastEma21;
-
-            // Bollinger Bands e BB %B
+            // ── BB %B ────────────────────────────────────────────────────────────
             const bb = bollingerBands(closes, BB_PERIOD, BB_STD);
             const bbUpper = bb.upper[bb.upper.length - 1];
             const bbLower = bb.lower[bb.lower.length - 1];
@@ -864,173 +841,144 @@ ${dir}
                 return range === 0 ? 0.5 : (closes[i + BB_PERIOD - 1] - bb.lower[i]) / range;
             });
             const lastBBP = bbpArr[bbpArr.length - 1];
-            const prevBBP = bbpArr.length > 1 ? bbpArr[bbpArr.length - 2] : lastBBP;
+            const prevBBP = bbpArr[bbpArr.length - 2] ?? lastBBP;
+            const prev2BBP = bbpArr[bbpArr.length - 3] ?? prevBBP;
 
-            // ── Velas de PRATA: posicionamento dos corpos (dominância estrutural) ──────────
-            // Compra: verde fecha ACIMA do topo do corpo vermelho anterior (prev.open = topo do vermelho)
-            // Venda: vermelho fecha ABAIXO do fundo do corpo verde anterior (prev.open = fundo do verde)
-            const bullishSilver = cur.close > cur.open && prev.close < prev.open && cur.close > prev.open;
-            const bearishSilver = cur.close < cur.open && prev.close > prev.open && cur.close < prev.open;
+            // ── Estrutura de mercado (swing com 10 candles) ──────────────────────
+            const { swingHighs, swingLows } = detectPivots(wCandles, 10);
+            const isHHHL = swingHighs.length >= 2 && swingLows.length >= 2 &&
+                swingHighs[swingHighs.length - 1].price > swingHighs[swingHighs.length - 2].price &&
+                swingLows[swingLows.length - 1].price > swingLows[swingLows.length - 2].price;
+            const isLHLL = swingHighs.length >= 2 && swingLows.length >= 2 &&
+                swingHighs[swingHighs.length - 1].price < swingHighs[swingHighs.length - 2].price &&
+                swingLows[swingLows.length - 1].price < swingLows[swingLows.length - 2].price;
 
-            // ── Velas de OURO: tamanho total (corpo + pavio) — absorção/liquidação institucional ─
-            // Compra: candle verde tem range total (high-low) maior que o candle vermelho anterior
-            // Venda: candle vermelho tem range total maior que o candle verde anterior
+            const lastSH = swingHighs.length >= 1 ? swingHighs[swingHighs.length - 1] : null;
+            const lastSL = swingLows.length >= 1 ? swingLows[swingLows.length - 1] : null;
+
+            // ── Vela de OURO: range atual > range anterior ───────────────────────
             const curRange = cur.high - cur.low;
             const prevRange = prev.high - prev.low;
+            const avg3Range = (curRange + prevRange + (prev2.high - prev2.low)) / 3;
             const bullishGold = cur.close > cur.open && prev.close < prev.open && curRange > prevRange;
             const bearishGold = cur.close < cur.open && prev.close > prev.open && curRange > prevRange;
+            // ── Vela de PRATA: range atual > média dos 3 últimos candles ─────────
+            const bullishSilver = cur.close > cur.open && prev.close < prev.open && curRange > avg3Range;
+            const bearishSilver = cur.close < cur.open && prev.close > prev.open && curRange > avg3Range;
+            const hasReversalCandle = (isLong) => isLong
+                ? (bullishGold || bullishSilver)
+                : (bearishGold || bearishSilver);
+            const candleLabel = (isLong) => {
+                if (isLong) return bullishGold ? '🥇 Vela de OURO Bullish' : '🥈 Vela de PRATA Bullish';
+                return bearishGold ? '🥇 Vela de OURO Bearish' : '🥈 Vela de PRATA Bearish';
+            };
 
-            // ── Golden Pocket 0.705 (Pine Script drawGoldenPocket) ──────────────
+            // ── Golden Pocket 0.705–0.786 ────────────────────────────────────────
             const fiboHigh = Math.max(...wCandles.slice(-50).map(c => c.high));
             const fiboLow = Math.min(...wCandles.slice(-50).map(c => c.low));
             const fiboRange = fiboHigh - fiboLow;
-            let gpTop, gpBottom;
-            if (isUpTrend || isHHHL) {
-                gpTop = fiboHigh - fiboRange * 0.705;
-                gpBottom = fiboHigh - fiboRange * 0.786;
-            } else {
-                gpTop = fiboLow + fiboRange * 0.786;
-                gpBottom = fiboLow + fiboRange * 0.705;
-            }
-            const inGP = cur.low <= gpTop && cur.close >= gpBottom;
-            const gpTag = inGP ? ' 🎯GP' : '';
+            const gpTopLong = fiboHigh - fiboRange * 0.705;
+            const gpBottomLong = fiboHigh - fiboRange * 0.786;
+            const gpTopShort = fiboLow + fiboRange * 0.786;
+            const gpBottomShort = fiboLow + fiboRange * 0.705;
+            const inGPLong = cur.low <= gpTopLong && cur.close >= gpBottomLong;
+            const inGPShort = cur.high >= gpBottomShort && cur.close <= gpTopShort;
 
-            // ── SINAL SHORT ──────────────────────────────────────────────────────
-            // Filtro obrigatório: o preço deve estar dentro de um OB de oferta (zona vermelha/supply)
-            const activeShortOB = priceInOB(cur, bearishOBs, false);
-            if (isDownTrend && prevBBP >= BBP_OVERBOUGHT && lastBBP < prevBBP && (bearishSilver || bearishGold) && activeShortOB) {
-                const slPrice = cur.high;
-                const risk = slPrice - cur.close;
-                if (risk <= 0) return null;
-                const rrTP = cur.close - 2 * risk;
-                const tpPrice = bbLower < cur.close ? Math.min(bbLower, rrTP) : rrTP;
-                return {
-                    isLong: false, price: cur.close, rsi: lastBBP, tpPrice, slPrice,
-                    candle: (bearishGold
-                        ? `🥇 Vela de OURO Bearish — BB %B sobrecomprado (${prevBBP.toFixed(2)})`
-                        : `🥈 Vela de PRATA Bearish — BB %B sobrecomprado (${prevBBP.toFixed(2)})`) + gpTag + ' 🟥OB',
-                    rsiBonus: true,
-                    retracePct: Math.round(((cur.close - lastSL.price) / Math.max(lastSH.price - lastSL.price, 0.0001)) * 100)
-                };
+            // ── Helper: algum dos 3 últimos candles tocou o OB? ──────────────────
+            function recentTouchOB(obs, isBullish) {
+                return [cur, prev, prev2].some(c => priceInOB(c, obs, isBullish));
             }
 
-            // ── SINAL LONG ───────────────────────────────────────────────────────
-            // Filtro obrigatório: o preço deve estar dentro de um OB de demanda (zona azul/demand)
-            const activeLongOB = priceInOB(cur, bullishOBs, true);
-            if (isUpTrend && prevBBP <= BBP_OVERSOLD && lastBBP > prevBBP && (bullishSilver || bullishGold) && activeLongOB) {
-                const slPrice = cur.low;
-                const risk = cur.close - slPrice;
-                if (risk <= 0) return null;
-                const rrTP = cur.close + 2 * risk;
-                const tpPrice = bbUpper > cur.close ? Math.max(bbUpper, rrTP) : rrTP;
-                return {
-                    isLong: true, price: cur.close, rsi: lastBBP, tpPrice, slPrice,
-                    candle: (bullishGold
-                        ? `🥇 Vela de OURO Bullish — BB %B sobrevendido (${prevBBP.toFixed(2)})`
-                        : `🥈 Vela de PRATA Bullish — BB %B sobrevendido (${prevBBP.toFixed(2)})`) + gpTag + ' 🟦OB',
-                    rsiBonus: true,
-                    retracePct: Math.round(((lastSH.price - cur.close) / Math.max(lastSH.price - lastSL.price, 0.0001)) * 100)
-                };
-            }
+            // ── PRÉ-ALERTA ───────────────────────────────────────────────────────
+            // Condição: 1 dos 3 últimos candles tocou OB + BB %B próximo do extremo
+            const recentLongTouch = recentTouchOB(bullishOBs, true);
+            const recentShortTouch = recentTouchOB(bearishOBs, false);
+            const bbpNearOversold = lastBBP <= 0.15 || prevBBP <= 0.15 || prev2BBP <= 0.15;
+            const bbpNearOverbought = lastBBP >= 0.85 || prevBBP >= 0.85 || prev2BBP >= 0.85;
 
-            // ── PRÉ-ALERTA LONG ──────────────────────────────────────────────────
-            // Filtro obrigatório: OB de demanda ativo (EMA21 ainda não confirmada)
-            const activeLongOBWatch = priceInOB(cur, bullishOBs, true);
-            if (isHHHL && prevBBP <= BBP_OVERSOLD && lastBBP > prevBBP && (bullishSilver || bullishGold) && activeLongOBWatch) {
+            // ── ALERTA FORTE ─────────────────────────────────────────────────────
+            // Todos os 5 confirmam: OB (candle atual) + BB %B extremo revertendo
+            //   + Vela Ouro/Prata + Swing HH/HL ou LH/LL + Golden Pocket
+            const curInLongOB = priceInOB(cur, bullishOBs, true);
+            const curInShortOB = priceInOB(cur, bearishOBs, false);
+
+            // ALERTA FORTE — LONG
+            if (curInLongOB && prevBBP <= BBP_OVERSOLD && lastBBP > prevBBP &&
+                hasReversalCandle(true) && isHHHL && inGPLong) {
                 const slPrice = cur.low;
                 const risk = cur.close - slPrice;
                 if (risk > 0) {
                     const rrTP = cur.close + 2 * risk;
                     const tpPrice = bbUpper > cur.close ? Math.max(bbUpper, rrTP) : rrTP;
+                    const gpTag = ' 🎯GP';
+                    const retracePct = lastSH && lastSL
+                        ? Math.round(((lastSH.price - cur.close) / Math.max(lastSH.price - lastSL.price, 0.0001)) * 100)
+                        : 0;
                     return {
-                        isLong: true, watchlist: true, price: cur.close, rsi: lastBBP, tpPrice, slPrice,
-                        candle: (bullishGold
-                            ? `🥇 Vela de OURO Bullish — BB %B sobrevendido (${prevBBP.toFixed(2)})`
-                            : `🥈 Vela de PRATA Bullish — BB %B sobrevendido (${prevBBP.toFixed(2)})`) + gpTag + ' 🟦OB',
-                        rsiBonus: true,
-                        retracePct: Math.round(((lastSH.price - cur.close) / Math.max(lastSH.price - lastSL.price, 0.0001)) * 100)
+                        isLong: true, price: cur.close, rsi: lastBBP, tpPrice, slPrice,
+                        candle: candleLabel(true) + gpTag + ' 🟦OB',
+                        rsiBonus: true, retracePct
                     };
                 }
             }
 
-            // ── PRÉ-ALERTA SHORT ─────────────────────────────────────────────────
-            // Filtro obrigatório: OB de oferta ativo (EMA21 ainda não confirmada)
-            const activeShortOBWatch = priceInOB(cur, bearishOBs, false);
-            if (isLHLL && prevBBP >= BBP_OVERBOUGHT && lastBBP < prevBBP && (bearishSilver || bearishGold) && activeShortOBWatch) {
+            // ALERTA FORTE — SHORT
+            if (curInShortOB && prevBBP >= BBP_OVERBOUGHT && lastBBP < prevBBP &&
+                hasReversalCandle(false) && isLHLL && inGPShort) {
                 const slPrice = cur.high;
                 const risk = slPrice - cur.close;
                 if (risk > 0) {
                     const rrTP = cur.close - 2 * risk;
                     const tpPrice = bbLower < cur.close ? Math.min(bbLower, rrTP) : rrTP;
+                    const gpTag = ' 🎯GP';
+                    const retracePct = lastSH && lastSL
+                        ? Math.round(((cur.close - lastSL.price) / Math.max(lastSH.price - lastSL.price, 0.0001)) * 100)
+                        : 0;
                     return {
-                        isLong: false, watchlist: true, price: cur.close, rsi: lastBBP, tpPrice, slPrice,
-                        candle: (bearishGold
-                            ? `🥇 Vela de OURO Bearish — BB %B sobrecomprado (${prevBBP.toFixed(2)})`
-                            : `🥈 Vela de PRATA Bearish — BB %B sobrecomprado (${prevBBP.toFixed(2)})`) + gpTag + ' 🟥OB',
-                        rsiBonus: true,
-                        retracePct: Math.round(((cur.close - lastSL.price) / Math.max(lastSH.price - lastSL.price, 0.0001)) * 100)
+                        isLong: false, price: cur.close, rsi: lastBBP, tpPrice, slPrice,
+                        candle: candleLabel(false) + gpTag + ' 🟥OB',
+                        rsiBonus: true, retracePct
                     };
                 }
             }
 
-            // ── SMC Order Block — parsedExtremes (Pine Script storeOrderBlock) ──
-            if (intSH.length >= 1 && intSL.length >= 1) {
-                const lastIntSH = intSH[intSH.length - 1];
-                const lastIntSL = intSL[intSL.length - 1];
-
-                // SMC LONG: HH/HL + EMA21 + toque no OB de demanda (parsedLow mínimo na perna)
-                if (isHHHL && cur.close > lastEma21 && bullishSilver) {
-                    const obFrom = Math.max(0, lastIntSL.index - 15);
-                    const obTo = Math.min(lastIntSL.index + 5, n - 3);
-                    if (obFrom < obTo) {
-                        const ob = findBullishOBParsed(wCandles, parsed, obFrom, obTo);
-                        const margin = ob.high * 0.002;
-                        if (cur.low <= ob.high + margin && cur.close >= ob.low && priceInOB(cur, bullishOBs, true)) {
-                            const slPrice = Math.min(cur.low, ob.low);
-                            const risk = cur.close - slPrice;
-                            if (risk > 0 && risk / cur.close < 0.06) {
-                                const rrTP = cur.close + 2 * risk;
-                                const tpPrice = bbUpper > cur.close ? Math.max(bbUpper, rrTP) : rrTP;
-                                return {
-                                    isLong: true, smcOB: true, price: cur.close, rsi: lastBBP, tpPrice, slPrice,
-                                    candle: (bullishGold ? `🥇 Vela OURO no OB Bullish` : `🥈 Vela PRATA no OB Bullish`) + gpTag,
-                                    rsiBonus: false,
-                                    retracePct: Math.round(((lastSH.price - cur.close) / Math.max(lastSH.price - lastSL.price, 0.0001)) * 100)
-                                };
-                            }
-                        }
-                    }
-                }
-
-                // SMC SHORT: LH/LL + EMA21 + toque no OB de oferta (parsedHigh máximo na perna)
-                if (isLHLL && cur.close < lastEma21 && bearishSilver) {
-                    const obFrom = Math.max(0, lastIntSH.index - 15);
-                    const obTo = Math.min(lastIntSH.index + 5, n - 3);
-                    if (obFrom < obTo) {
-                        const ob = findBearishOBParsed(wCandles, parsed, obFrom, obTo);
-                        const margin = ob.low * 0.002;
-                        if (cur.high >= ob.low - margin && cur.close <= ob.high && priceInOB(cur, bearishOBs, false)) {
-                            const slPrice = Math.max(cur.high, ob.high);
-                            const risk = slPrice - cur.close;
-                            if (risk > 0 && risk / cur.close < 0.06) {
-                                const rrTP = cur.close - 2 * risk;
-                                const tpPrice = bbLower < cur.close ? Math.min(bbLower, rrTP) : rrTP;
-                                return {
-                                    isLong: false, smcOB: true, price: cur.close, rsi: lastBBP, tpPrice, slPrice,
-                                    candle: (bearishGold ? `🥇 Vela OURO no OB Bearish` : `🥈 Vela PRATA no OB Bearish`) + gpTag,
-                                    rsiBonus: false,
-                                    retracePct: Math.round(((cur.close - lastSL.price) / Math.max(lastSH.price - lastSL.price, 0.0001)) * 100)
-                                };
-                            }
-                        }
-                    }
+            // PRÉ-ALERTA — LONG
+            if (recentLongTouch && bbpNearOversold) {
+                const slPrice = cur.low;
+                const risk = cur.close - slPrice;
+                if (risk > 0) {
+                    const rrTP = cur.close + 2 * risk;
+                    const tpPrice = bbUpper > cur.close ? Math.max(bbUpper, rrTP) : rrTP;
+                    const retracePct = lastSH && lastSL
+                        ? Math.round(((lastSH.price - cur.close) / Math.max(lastSH.price - lastSL.price, 0.0001)) * 100)
+                        : 0;
+                    return {
+                        isLong: true, watchlist: true, price: cur.close, rsi: lastBBP, tpPrice, slPrice,
+                        candle: `BB %B: ${lastBBP.toFixed(2)} — próximo da sobrevenda 🟦OB`,
+                        rsiBonus: false, retracePct
+                    };
                 }
             }
 
-            return {
-                isLong: null, price: cur.close, rsi: lastBBP,
-                reason: `Tendência: ${isUpTrend ? 'alta' : isDownTrend ? 'baixa' : 'indefinida'} | BB %B: ${lastBBP.toFixed(2)}${inGP ? ' | GP ativo' : ''}`
-            };
+            // PRÉ-ALERTA — SHORT
+            if (recentShortTouch && bbpNearOverbought) {
+                const slPrice = cur.high;
+                const risk = slPrice - cur.close;
+                if (risk > 0) {
+                    const rrTP = cur.close - 2 * risk;
+                    const tpPrice = bbLower < cur.close ? Math.min(bbLower, rrTP) : rrTP;
+                    const retracePct = lastSH && lastSL
+                        ? Math.round(((cur.close - lastSL.price) / Math.max(lastSH.price - lastSL.price, 0.0001)) * 100)
+                        : 0;
+                    return {
+                        isLong: false, watchlist: true, price: cur.close, rsi: lastBBP, tpPrice, slPrice,
+                        candle: `BB %B: ${lastBBP.toFixed(2)} — próximo da sobrecompra 🟥OB`,
+                        rsiBonus: false, retracePct
+                    };
+                }
+            }
+
+            return { isLong: null, price: cur.close, rsi: lastBBP, reason: `BB %B: ${lastBBP.toFixed(2)}` };
         }
 
         // ── Dados ────────────────────────────────────────────────────────────────
@@ -1212,15 +1160,11 @@ ${dir}
                 else localStorage.removeItem('bankValue');
             });
 
-            log('📊 Bot carregado — SMC Híbrido (Pine Script) | [1] BB %B Extremo | [2] SMC Order Block | [3] Golden Pocket 0.705');
-            log('ℹ️  Swings: 10 candles confirmação (Swing) + 5 candles (Interno) | OBs: parsedExtremes ATR-ajustados');
-            log('🟢 BB %B LONG : HH/HL + EMA21 acima + BB %B ≤ 0 revertendo + Vela OURO/PRATA + 🟦 OB Demanda ativo');
-            log('🔴 BB %B SHORT: LH/LL + EMA21 abaixo + BB %B ≥ 1 revertendo + Vela OURO/PRATA + 🟥 OB Oferta ativo');
-            log('🏛️  SMC LONG  : HH/HL + EMA21 + toque no OB demanda (parsedLow mín) + Vela reversão');
-            log('🏛️  SMC SHORT : LH/LL + EMA21 + toque no OB oferta (parsedHigh máx) + Vela reversão');
-            log('🎯 Golden Pocket: 0.705–0.786 Fibo do último swing — marcado em todos os sinais com 🎯GP');
-            log('📐 TP = BB oposta / RR 2:1 | SL = Topo/Fundo da vela de entrada ou base do OB');
-            log('🥇 OURO: range total (corpo+pavio) do candle atual > anterior | 🥈 PRATA: corpo fecha além do corpo anterior');
+            log('📊 Bot carregado — OB + BB %B + Vela + Swing + Golden Pocket');
+            log('🟡 PRÉ-ALERTA  : 1 dos 3 últimos candles tocou OB + BB %B ≤ 0.15 (long) ou ≥ 0.85 (short)');
+            log('🟢🔴 ALERTA FORTE: candle atual no OB + BB %B extremo revertendo + Vela Ouro/Prata + HH/HL ou LH/LL + Golden Pocket 0.705');
+            log('🥇 OURO: range atual > range anterior | 🥈 PRATA: range atual > média dos últimos 3 candles');
+            log('📐 TP = BB oposta / RR 2:1 | SL = fundo (long) ou topo (short) do candle de entrada');
 
             // Retoma bot automaticamente se estava ativo antes de sair da página
             if (localStorage.getItem('botRunning') === '1') {
