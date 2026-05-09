@@ -410,6 +410,7 @@
         let isScanning = false;
         let lastSignalTimestamps = {};  // { symbol: timestamp }
         let allSymbols = [];
+        let symbolLeverage = {};        // { symbol: maxLeverage }
 
         // ── UI helpers ───────────────────────────────────────────────────────────
         function log(message) {
@@ -446,7 +447,7 @@
             return res.json();
         }
 
-        function buildTelegramMsg(isLong, symbol, price, rsiVal, tpPrice, slPrice, candlePat, rsiBonus, retracePct, bankValue) {
+        function buildTelegramMsg(isLong, symbol, price, rsiVal, tpPrice, slPrice, candlePat, rsiBonus, retracePct, bankValue, leverage = MAX_LEVERAGE) {
             const dir = isLong ? '🟢 LONG (COMPRA)' : '🔴 SHORT (VENDA)';
             const trendLbl = isLong ? '📈 Alta — HH/HL + preço acima da EMA21' : '📉 Baixa — LH/LL + preço abaixo da EMA21';
             const setupLbl = isLong
@@ -479,7 +480,7 @@ ${dir}
 🎯 <b>TP:</b> ${tpPrice.toFixed(6)} USDT (+${tpPct}%) — ${bbTpLabel}
 🛡 <b>SL:</b> ${slPrice.toFixed(6)} USDT (-${slPct}%) — ${bbSlLabel}
 💰 <b>Banca:</b> ${POSITION_SIZE}% ($${entrada.toFixed(2)})
-⚖️ <b>Alavancagem sugerida:</b> até ${MAX_LEVERAGE}x
+⚖️ <b>Alavancagem sugerida:</b> até ${leverage}x
 
 📊 <b>Padrão de candle:</b> ${candlePat || 'Nenhum'}
 
@@ -522,7 +523,7 @@ ${dir}
 #Bybit #PreAlerta #${ticker}`;
         }
 
-        function buildTelegramSmcMsg(isLong, symbol, price, bbpVal, tpPrice, slPrice, candlePat, retracePct, bankValue) {
+        function buildTelegramSmcMsg(isLong, symbol, price, bbpVal, tpPrice, slPrice, candlePat, retracePct, bankValue, leverage = MAX_LEVERAGE) {
             const dir = isLong ? '🟢 LONG (COMPRA)' : '🔴 SHORT (VENDA)';
             const trendLbl = isLong ? '📈 Alta — HH/HL + preço acima da EMA21' : '📉 Baixa — LH/LL + preço abaixo da EMA21';
             const entrada = bankValue * (POSITION_SIZE / 100);
@@ -545,7 +546,7 @@ ${dir}
 🎯 <b>TP:</b> ${tpPrice.toFixed(6)} USDT (+${tpPct}%)
 🛡 <b>SL:</b> ${slPrice.toFixed(6)} USDT (-${slPct}%) — Base do OB
 💰 <b>Banca:</b> ${POSITION_SIZE}% ($${entrada.toFixed(2)})
-⚖️ <b>Alavancagem sugerida:</b> até ${MAX_LEVERAGE}x
+⚖️ <b>Alavancagem sugerida:</b> até ${leverage}x
 
 📊 <b>Candle:</b> ${candlePat || 'Nenhum'}
 
@@ -571,7 +572,7 @@ ${dir}
             } catch (e) { }
         }
 
-        function showSignalCard(isLong, symbol, price, rsi, tpPrice, slPrice, candleLabel, watchlist, smcOB = false) {
+        function showSignalCard(isLong, symbol, price, rsi, tpPrice, slPrice, candleLabel, watchlist, smcOB = false, leverage = MAX_LEVERAGE) {
             const card = document.getElementById('signal-card');
             const dirClass = smcOB
                 ? (isLong ? 'smc-long' : 'smc-short')
@@ -597,7 +598,7 @@ ${dir}
                 ? '📈 Reversão Bullish — BB %B Extremo'
                 : '📉 Reversão Bearish — BB %B Extremo';
             document.getElementById('sig-entry').textContent = price.toFixed(6);
-            document.getElementById('sig-leverage').textContent = MAX_LEVERAGE + 'x';
+            document.getElementById('sig-leverage').textContent = leverage + 'x';
             document.getElementById('sig-size').textContent = POSITION_SIZE + '%  ($' + entrada.toFixed(2) + ')';
             document.getElementById('sig-tp').textContent = `+${tpPct}%  (~${tpPrice.toFixed(6)}) — BB Sup`;
             document.getElementById('sig-sl').textContent = `-${slPct}%  (~${slPrice.toFixed(6)}) — BB Inf`;
@@ -994,10 +995,12 @@ ${dir}
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const json = await res.json();
                 if (json.retCode !== 0) throw new Error(json.retMsg);
-                return json.result.list
-                    .filter(s => s.symbol.endsWith('USDT'))
-                    .map(s => s.symbol)
-                    .sort();
+                const list = json.result.list.filter(s => s.symbol.endsWith('USDT'));
+                list.forEach(s => {
+                    const lev = Number(s.leverageFilter?.maxLeverage ?? MAX_LEVERAGE);
+                    symbolLeverage[s.symbol] = lev > 0 ? lev : MAX_LEVERAGE;
+                });
+                return list.map(s => s.symbol).sort();
             } catch (err) {
                 log(`❌ Erro ao buscar lista de ativos: ${err.message}`);
                 return [];
@@ -1070,19 +1073,20 @@ ${dir}
 
                         const bybitUrl = `https://www.bybit.com/trade/usdt/${symbol}`;
                         const symLink = `<a href="${bybitUrl}" target="_blank">${symbol}</a>`;
+                        const symMaxLev = symbolLeverage[symbol] ?? MAX_LEVERAGE;
 
                         if (result.smcOB) {
                             const smcDir = result.isLong ? 'OB LONG 🏛️🟢' : 'OB SHORT 🏛️🔴';
                             log(`🏛️ ${symLink} — SMC ${smcDir} | ${trendLbl} | ${result.candle} | BB %B: ${result.rsi.toFixed(2)} | TP: ${result.tpPrice.toFixed(6)} | SL: ${result.slPrice.toFixed(6)}`);
-                            showSignalCard(result.isLong, symbol, result.price, result.rsi, result.tpPrice, result.slPrice, result.candle, false, true);
+                            showSignalCard(result.isLong, symbol, result.price, result.rsi, result.tpPrice, result.slPrice, result.candle, false, true, symMaxLev);
                             playAlert(result.isLong);
-                            const tgSmcMsg = buildTelegramSmcMsg(result.isLong, symbol, result.price, result.rsi, result.tpPrice, result.slPrice, result.candle, result.retracePct, bank);
+                            const tgSmcMsg = buildTelegramSmcMsg(result.isLong, symbol, result.price, result.rsi, result.tpPrice, result.slPrice, result.candle, result.retracePct, bank, symMaxLev);
                             sendTelegram(tgSmcMsg)
                                 .then(() => log(`📬 Sinal SMC de ${symLink} enviado para o Telegram!`))
                                 .catch(err => log(`⚠️ Telegram erro (${symbol}): ${err.message}`));
                         } else if (result.watchlist) {
                             log(`🟡 ${symLink} — PRÉ-ALERTA ${dir} | ${trendLbl} válida | EMA21 não confirmada | ${result.candle} | TP: ${result.tpPrice.toFixed(6)} | SL: ${result.slPrice.toFixed(6)}`);
-                            showSignalCard(result.isLong, symbol, result.price, result.rsi, result.tpPrice, result.slPrice, result.candle, true);
+                            showSignalCard(result.isLong, symbol, result.price, result.rsi, result.tpPrice, result.slPrice, result.candle, true, false, symMaxLev);
                             const tgWatchMsg = buildTelegramWatchlistMsg(result.isLong, symbol, result.price, result.rsi, result.tpPrice, result.slPrice, result.candle, result.retracePct, bank);
                             sendTelegram(tgWatchMsg)
                                 .then(() => log(`📬 Pré-alerta de ${symLink} enviado para o Telegram!`))
@@ -1090,9 +1094,9 @@ ${dir}
                         } else {
                             const setupLbl = result.isLong ? 'Reversão Bullish' : 'Reversão Bearish';
                             log(`🚀 ${symLink} — ${dir} | BB %B Extremo | ${trendLbl} | ${setupLbl} | ${result.candle} | TP: ${result.tpPrice.toFixed(6)} | SL: ${result.slPrice.toFixed(6)}`);
-                            showSignalCard(result.isLong, symbol, result.price, result.rsi, result.tpPrice, result.slPrice, result.candle, false);
+                            showSignalCard(result.isLong, symbol, result.price, result.rsi, result.tpPrice, result.slPrice, result.candle, false, false, symMaxLev);
                             playAlert(result.isLong);
-                            const tgMsg = buildTelegramMsg(result.isLong, symbol, result.price, result.rsi, result.tpPrice, result.slPrice, result.candle, result.rsiBonus, result.retracePct, bank);
+                            const tgMsg = buildTelegramMsg(result.isLong, symbol, result.price, result.rsi, result.tpPrice, result.slPrice, result.candle, result.rsiBonus, result.retracePct, bank, symMaxLev);
                             sendTelegram(tgMsg)
                                 .then(() => log(`📬 Sinal de ${symLink} enviado para o Telegram!`))
                                 .catch(err => log(`⚠️ Telegram erro (${symbol}): ${err.message}`));
@@ -1139,6 +1143,7 @@ ${dir}
             isScanning = false;
             lastSignalTimestamps = {};
             allSymbols = [];
+            symbolLeverage = {};
             setBtnState(false);
             hideSignalCard();
             updateStatus('🔴 Parado');
