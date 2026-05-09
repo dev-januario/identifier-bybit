@@ -721,6 +721,91 @@ ${dir}
             return { high: candles[obIdx].high, low: candles[obIdx].low };
         }
 
+        // ── Swing Order Blocks ativos (Supply/Demand) — Pine Script storeOrdeBlock() ────────────
+        // OB Bullish (demand/azul) : formado quando close rompe acima do swingHigh → candle de menor
+        //   parsedLow na perna (zona onde compradores institucionais absorveram a oferta)
+        // OB Bearish (supply/vermelho): formado quando close rompe abaixo do swingLow → candle de maior
+        //   parsedHigh na perna (zona onde vendedores institucionais absorveram a demanda)
+        // Mitigação: OB bullish inválido se close < ob.low | OB bearish inválido se close > ob.high
+        function buildActiveOrderBlocks(wCandles, parsed, size) {
+            const n = wCandles.length;
+            const bullishOBs = [];
+            const bearishOBs = [];
+
+            const { swingHighs, swingLows } = detectPivots(wCandles, size);
+
+            // Cada pivô só é "conhecido" após 'size' barras de confirmação (replica o delay do Pine Script)
+            const events = [];
+            for (const sh of swingHighs) events.push({ type: 'SH', idx: sh.index, level: sh.price, confirmedAt: sh.index + size });
+            for (const sl of swingLows) events.push({ type: 'SL', idx: sl.index, level: sl.price, confirmedAt: sl.index + size });
+            events.sort((a, b) => a.confirmedAt - b.confirmedAt);
+
+            let trackSH = null;
+            let trackSL = null;
+            let evPtr = 0;
+
+            for (let b = 0; b < n; b++) {
+                // Atualiza o pivô ativo à medida que os candles são confirmados
+                while (evPtr < events.length && events[evPtr].confirmedAt <= b) {
+                    const ev = events[evPtr++];
+                    if (ev.type === 'SH') {
+                        trackSH = { level: ev.level, idx: ev.idx, crossed: false };
+                    } else {
+                        trackSL = { level: ev.level, idx: ev.idx, crossed: false };
+                    }
+                }
+                const c = wCandles[b];
+
+                // Rompimento bullish: close acima do swingHigh → cria OB de demanda (azul)
+                if (trackSH && !trackSH.crossed && c.close > trackSH.level) {
+                    trackSH.crossed = true;
+                    let minPL = Infinity, obIdx = trackSH.idx;
+                    for (let k = trackSH.idx; k <= b; k++) {
+                        if (parsed[k] && parsed[k].parsedLow < minPL) { minPL = parsed[k].parsedLow; obIdx = k; }
+                    }
+                    bullishOBs.push({ high: wCandles[obIdx].high, low: wCandles[obIdx].low, mitigated: false });
+                }
+
+                // Rompimento bearish: close abaixo do swingLow → cria OB de oferta (vermelho)
+                if (trackSL && !trackSL.crossed && c.close < trackSL.level) {
+                    trackSL.crossed = true;
+                    let maxPH = -Infinity, obIdx = trackSL.idx;
+                    for (let k = trackSL.idx; k <= b; k++) {
+                        if (parsed[k] && parsed[k].parsedHigh > maxPH) { maxPH = parsed[k].parsedHigh; obIdx = k; }
+                    }
+                    bearishOBs.push({ high: wCandles[obIdx].high, low: wCandles[obIdx].low, mitigated: false });
+                }
+
+                // Mitigação de OBs: remove zona quando o preço fecha através dela
+                for (const ob of bullishOBs) {
+                    if (!ob.mitigated && c.close < ob.low) ob.mitigated = true;
+                }
+                for (const ob of bearishOBs) {
+                    if (!ob.mitigated && c.close > ob.high) ob.mitigated = true;
+                }
+            }
+
+            return {
+                bullishOBs: bullishOBs.filter(ob => !ob.mitigated),
+                bearishOBs: bearishOBs.filter(ob => !ob.mitigated)
+            };
+        }
+
+        // Retorna o OB tocado pelo candle atual (margem de 0,2%) ou null se nenhum for tocado
+        // Bullish OB: wick desce até o OB e fechamento não rompe abaixo do fundo
+        // Bearish OB: wick sobe até o OB e fechamento não rompe acima do topo
+        function priceInOB(candle, obs, isBullish) {
+            const margin = candle.close * 0.002;
+            for (const ob of obs) {
+                if (isBullish) {
+                    if (candle.low <= ob.high + margin && candle.close >= ob.low) return ob;
+                } else {
+                    if (candle.high >= ob.low - margin && candle.close <= ob.high) return ob;
+                }
+            }
+            return null;
+        }
+
         function analyzeSignal(candles) {
             const minLen = 80;
             if (candles.length < minLen) return null;
@@ -734,6 +819,11 @@ ${dir}
             // ATR e extremos ajustados por volatilidade (Pine Script parsedHighs/parsedLows)
             const atr = calcATR(wCandles, Math.min(50, n - 1));
             const parsed = getParsedExtremes(wCandles, atr);
+
+            // ── Zonas de Supply/Demand (filtro obrigatório de zona) ───────────────
+            // Todos os sinais BB %B e Pré-Alerta só disparam se o preço estiver dentro
+            // de um Order Block ativo não-mitigado (zona vermelha = supply, azul = demand)
+            const { bullishOBs, bearishOBs } = buildActiveOrderBlocks(wCandles, parsed, 10);
 
             // Estrutura Swing — 10 candles cada lado (Pine Script swingsLengthInput ≈ 10–15)
             const { swingHighs, swingLows } = detectPivots(wCandles, 10);
@@ -772,21 +862,19 @@ ${dir}
             const lastBBP = bbpArr[bbpArr.length - 1];
             const prevBBP = bbpArr.length > 1 ? bbpArr[bbpArr.length - 2] : lastBBP;
 
-            // Velas de PRATA e OURO
-            const curBody = Math.abs(cur.close - cur.open);
-            const prevBody = Math.abs(prev.close - prev.open);
+            // ── Velas de PRATA: posicionamento dos corpos (dominância estrutural) ──────────
+            // Compra: verde fecha ACIMA do topo do corpo vermelho anterior (prev.open = topo do vermelho)
+            // Venda: vermelho fecha ABAIXO do fundo do corpo verde anterior (prev.open = fundo do verde)
+            const bullishSilver = cur.close > cur.open && prev.close < prev.open && cur.close > prev.open;
+            const bearishSilver = cur.close < cur.open && prev.close > prev.open && cur.close < prev.open;
+
+            // ── Velas de OURO: tamanho total (corpo + pavio) — absorção/liquidação institucional ─
+            // Compra: candle verde tem range total (high-low) maior que o candle vermelho anterior
+            // Venda: candle vermelho tem range total maior que o candle verde anterior
             const curRange = cur.high - cur.low;
             const prevRange = prev.high - prev.low;
-
-            const bullishSilver =
-                cur.close > cur.open && prev.close < prev.open &&
-                (cur.low < prev.low || Math.min(cur.open, cur.close) < Math.min(prev.open, prev.close));
-            const bullishGold = bullishSilver && (curBody > prevBody || curRange > prevRange);
-
-            const bearishSilver =
-                cur.close < cur.open && prev.close > prev.open &&
-                (cur.high > prev.high || Math.max(cur.open, cur.close) > Math.max(prev.open, prev.close));
-            const bearishGold = bearishSilver && (curBody > prevBody || curRange > prevRange);
+            const bullishGold = cur.close > cur.open && prev.close < prev.open && curRange > prevRange;
+            const bearishGold = cur.close < cur.open && prev.close > prev.open && curRange > prevRange;
 
             // ── Golden Pocket 0.705 (Pine Script drawGoldenPocket) ──────────────
             const fiboHigh = Math.max(...wCandles.slice(-50).map(c => c.high));
@@ -804,7 +892,9 @@ ${dir}
             const gpTag = inGP ? ' 🎯GP' : '';
 
             // ── SINAL SHORT ──────────────────────────────────────────────────────
-            if (isDownTrend && prevBBP >= BBP_OVERBOUGHT && lastBBP < prevBBP && bearishSilver) {
+            // Filtro obrigatório: o preço deve estar dentro de um OB de oferta (zona vermelha/supply)
+            const activeShortOB = priceInOB(cur, bearishOBs, false);
+            if (isDownTrend && prevBBP >= BBP_OVERBOUGHT && lastBBP < prevBBP && (bearishSilver || bearishGold) && activeShortOB) {
                 const slPrice = cur.high;
                 const risk = slPrice - cur.close;
                 if (risk <= 0) return null;
@@ -814,14 +904,16 @@ ${dir}
                     isLong: false, price: cur.close, rsi: lastBBP, tpPrice, slPrice,
                     candle: (bearishGold
                         ? `🥇 Vela de OURO Bearish — BB %B sobrecomprado (${prevBBP.toFixed(2)})`
-                        : `🥈 Vela de PRATA Bearish — BB %B sobrecomprado (${prevBBP.toFixed(2)})`) + gpTag,
+                        : `🥈 Vela de PRATA Bearish — BB %B sobrecomprado (${prevBBP.toFixed(2)})`) + gpTag + ' 🟥OB',
                     rsiBonus: true,
                     retracePct: Math.round(((cur.close - lastSL.price) / Math.max(lastSH.price - lastSL.price, 0.0001)) * 100)
                 };
             }
 
             // ── SINAL LONG ───────────────────────────────────────────────────────
-            if (isUpTrend && prevBBP <= BBP_OVERSOLD && lastBBP > prevBBP && bullishSilver) {
+            // Filtro obrigatório: o preço deve estar dentro de um OB de demanda (zona azul/demand)
+            const activeLongOB = priceInOB(cur, bullishOBs, true);
+            if (isUpTrend && prevBBP <= BBP_OVERSOLD && lastBBP > prevBBP && (bullishSilver || bullishGold) && activeLongOB) {
                 const slPrice = cur.low;
                 const risk = cur.close - slPrice;
                 if (risk <= 0) return null;
@@ -831,14 +923,16 @@ ${dir}
                     isLong: true, price: cur.close, rsi: lastBBP, tpPrice, slPrice,
                     candle: (bullishGold
                         ? `🥇 Vela de OURO Bullish — BB %B sobrevendido (${prevBBP.toFixed(2)})`
-                        : `🥈 Vela de PRATA Bullish — BB %B sobrevendido (${prevBBP.toFixed(2)})`) + gpTag,
+                        : `🥈 Vela de PRATA Bullish — BB %B sobrevendido (${prevBBP.toFixed(2)})`) + gpTag + ' 🟦OB',
                     rsiBonus: true,
                     retracePct: Math.round(((lastSH.price - cur.close) / Math.max(lastSH.price - lastSL.price, 0.0001)) * 100)
                 };
             }
 
             // ── PRÉ-ALERTA LONG ──────────────────────────────────────────────────
-            if (isHHHL && prevBBP <= BBP_OVERSOLD && lastBBP > prevBBP && bullishSilver) {
+            // Filtro obrigatório: OB de demanda ativo (EMA21 ainda não confirmada)
+            const activeLongOBWatch = priceInOB(cur, bullishOBs, true);
+            if (isHHHL && prevBBP <= BBP_OVERSOLD && lastBBP > prevBBP && (bullishSilver || bullishGold) && activeLongOBWatch) {
                 const slPrice = cur.low;
                 const risk = cur.close - slPrice;
                 if (risk > 0) {
@@ -848,7 +942,7 @@ ${dir}
                         isLong: true, watchlist: true, price: cur.close, rsi: lastBBP, tpPrice, slPrice,
                         candle: (bullishGold
                             ? `🥇 Vela de OURO Bullish — BB %B sobrevendido (${prevBBP.toFixed(2)})`
-                            : `🥈 Vela de PRATA Bullish — BB %B sobrevendido (${prevBBP.toFixed(2)})`) + gpTag,
+                            : `🥈 Vela de PRATA Bullish — BB %B sobrevendido (${prevBBP.toFixed(2)})`) + gpTag + ' 🟦OB',
                         rsiBonus: true,
                         retracePct: Math.round(((lastSH.price - cur.close) / Math.max(lastSH.price - lastSL.price, 0.0001)) * 100)
                     };
@@ -856,7 +950,9 @@ ${dir}
             }
 
             // ── PRÉ-ALERTA SHORT ─────────────────────────────────────────────────
-            if (isLHLL && prevBBP >= BBP_OVERBOUGHT && lastBBP < prevBBP && bearishSilver) {
+            // Filtro obrigatório: OB de oferta ativo (EMA21 ainda não confirmada)
+            const activeShortOBWatch = priceInOB(cur, bearishOBs, false);
+            if (isLHLL && prevBBP >= BBP_OVERBOUGHT && lastBBP < prevBBP && (bearishSilver || bearishGold) && activeShortOBWatch) {
                 const slPrice = cur.high;
                 const risk = slPrice - cur.close;
                 if (risk > 0) {
@@ -866,7 +962,7 @@ ${dir}
                         isLong: false, watchlist: true, price: cur.close, rsi: lastBBP, tpPrice, slPrice,
                         candle: (bearishGold
                             ? `🥇 Vela de OURO Bearish — BB %B sobrecomprado (${prevBBP.toFixed(2)})`
-                            : `🥈 Vela de PRATA Bearish — BB %B sobrecomprado (${prevBBP.toFixed(2)})`) + gpTag,
+                            : `🥈 Vela de PRATA Bearish — BB %B sobrecomprado (${prevBBP.toFixed(2)})`) + gpTag + ' 🟥OB',
                         rsiBonus: true,
                         retracePct: Math.round(((cur.close - lastSL.price) / Math.max(lastSH.price - lastSL.price, 0.0001)) * 100)
                     };
@@ -1114,12 +1210,13 @@ ${dir}
 
             log('📊 Bot carregado — SMC Híbrido (Pine Script) | [1] BB %B Extremo | [2] SMC Order Block | [3] Golden Pocket 0.705');
             log('ℹ️  Swings: 10 candles confirmação (Swing) + 5 candles (Interno) | OBs: parsedExtremes ATR-ajustados');
-            log('🟢 BB %B LONG : HH/HL + EMA21 acima + BB %B ≤ 0 revertendo + Vela OURO/PRATA');
-            log('🔴 BB %B SHORT: LH/LL + EMA21 abaixo + BB %B ≥ 1 revertendo + Vela OURO/PRATA');
+            log('🟢 BB %B LONG : HH/HL + EMA21 acima + BB %B ≤ 0 revertendo + Vela OURO/PRATA + 🟦 OB Demanda ativo');
+            log('🔴 BB %B SHORT: LH/LL + EMA21 abaixo + BB %B ≥ 1 revertendo + Vela OURO/PRATA + 🟥 OB Oferta ativo');
             log('🏛️  SMC LONG  : HH/HL + EMA21 + toque no OB demanda (parsedLow mín) + Vela reversão');
             log('🏛️  SMC SHORT : LH/LL + EMA21 + toque no OB oferta (parsedHigh máx) + Vela reversão');
             log('🎯 Golden Pocket: 0.705–0.786 Fibo do último swing — marcado em todos os sinais com 🎯GP');
             log('📐 TP = BB oposta / RR 2:1 | SL = Topo/Fundo da vela de entrada ou base do OB');
+            log('🥇 OURO: range total (corpo+pavio) do candle atual > anterior | 🥈 PRATA: corpo fecha além do corpo anterior');
 
             // Retoma bot automaticamente se estava ativo antes de sair da página
             if (localStorage.getItem('botRunning') === '1') {
