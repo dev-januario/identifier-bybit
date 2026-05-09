@@ -798,9 +798,13 @@ ${dir}
             const margin = candle.close * 0.002;
             for (const ob of obs) {
                 if (isBullish) {
-                    if (candle.low <= ob.high + margin && candle.close >= ob.low) return ob;
+                    // Wick entra na zona (low ≤ topo do OB) E fechamento está DENTRO ou muito próximo do OB
+                    // Rejeita candles que já subiram muito acima do OB (close > ob.high * 1.015)
+                    if (candle.low <= ob.high + margin && candle.close >= ob.low && candle.close <= ob.high * 1.015) return ob;
                 } else {
-                    if (candle.high >= ob.low - margin && candle.close <= ob.high) return ob;
+                    // Wick entra na zona (high ≥ fundo do OB) E fechamento está DENTRO ou muito próximo do OB
+                    // Rejeita candles que já caíram muito abaixo do OB (close < ob.low * 0.985)
+                    if (candle.high >= ob.low - margin && candle.close <= ob.high && candle.close >= ob.low * 0.985) return ob;
                 }
             }
             return null;
@@ -981,7 +985,7 @@ ${dir}
                     if (obFrom < obTo) {
                         const ob = findBullishOBParsed(wCandles, parsed, obFrom, obTo);
                         const margin = ob.high * 0.002;
-                        if ((cur.low <= ob.high + margin || prev.low <= ob.high + margin) && cur.close >= ob.low) {
+                        if (cur.low <= ob.high + margin && cur.close >= ob.low && priceInOB(cur, bullishOBs, true)) {
                             const slPrice = Math.min(cur.low, ob.low);
                             const risk = cur.close - slPrice;
                             if (risk > 0 && risk / cur.close < 0.06) {
@@ -1005,7 +1009,7 @@ ${dir}
                     if (obFrom < obTo) {
                         const ob = findBearishOBParsed(wCandles, parsed, obFrom, obTo);
                         const margin = ob.low * 0.002;
-                        if ((cur.high >= ob.low - margin || prev.high >= ob.low - margin) && cur.close <= ob.high) {
+                        if (cur.high >= ob.low - margin && cur.close <= ob.high && priceInOB(cur, bearishOBs, false)) {
                             const slPrice = Math.max(cur.high, ob.high);
                             const risk = slPrice - cur.close;
                             if (risk > 0 && risk / cur.close < 0.06) {
