@@ -239,12 +239,6 @@
             border-color: #D73A49;
         }
 
-        #signal-card.watchlist-long,
-        #signal-card.watchlist-short {
-            background: #261A00;
-            border-color: #F5A623;
-        }
-
         #signal-card.smc-long {
             background: #0D1827;
             border-color: #4A90E2;
@@ -487,42 +481,6 @@ ${dir}
 #Bybit #ReversaoBBPercent #${ticker}`;
         }
 
-        function buildTelegramWatchlistMsg(isLong, symbol, price, rsiVal, tpPrice, slPrice, candlePat, retracePct, bankValue) {
-            const dir = isLong ? '🟡 PRÉ-ALERTA LONG' : '🟡 PRÉ-ALERTA SHORT';
-            const trendLbl = isLong
-                ? '📈 Estrutura Alta (HH/HL) confirmada — preço ainda abaixo da EMA21'
-                : '📉 Estrutura Baixa (LH/LL) confirmada — preço ainda acima da EMA21';
-            const setupLbl = isLong
-                ? 'Reversão Bullish potencial — BB %B sobrevendido + vela de reversão'
-                : 'Reversão Bearish potencial — BB %B sobrecomprado + vela de reversão';
-            const entrada = bankValue * (POSITION_SIZE / 100);
-            const tpPct = ((Math.abs(tpPrice - price) / price) * 100).toFixed(2);
-            const slPct = ((Math.abs(slPrice - price) / price) * 100).toFixed(2);
-            const now = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
-            const ticker = symbol.replace('USDT', '');
-
-            return `⚠️ <b>PRÉ-ALERTA — ${symbol} (1H)</b>
-
-${dir}
-📅 ${now}
-
-📌 <b>Setup:</b> ${setupLbl}
-📊 <b>Estrutura:</b> ${trendLbl}
-🔄 <b>Retração:</b> ${retracePct}% do impulso
-📉 <b>BB %B (20,2):</b> ${rsiVal.toFixed(2)} — revertendo
-
-⚠️ <b>EMA21 ainda não confirmada.</b> Aguarde o preço cruzar a EMA21 para entrada confirmada, ou entre com gestão reduzida.
-
-💵 <b>Ref. Entrada:</b> ${price.toFixed(6)} USDT
-🎯 <b>Ref. TP:</b> ${tpPrice.toFixed(6)} USDT (+${tpPct}%)
-🛡 <b>Ref. SL:</b> ${slPrice.toFixed(6)} USDT (-${slPct}%)
-💰 <b>Banca:</b> ${POSITION_SIZE}% ($${entrada.toFixed(2)})
-
-📊 <b>Candle:</b> ${candlePat || 'Nenhum'}
-
-#Bybit #PreAlerta #${ticker}`;
-        }
-
         function buildTelegramSmcMsg(isLong, symbol, price, bbpVal, tpPrice, slPrice, candlePat, retracePct, bankValue, leverage = MAX_LEVERAGE) {
             const dir = isLong ? '🟢 LONG (COMPRA)' : '🔴 SHORT (VENDA)';
             const trendLbl = isLong ? '📈 Alta — HH/HL + preço acima da EMA21' : '📉 Baixa — LH/LL + preço abaixo da EMA21';
@@ -572,13 +530,11 @@ ${dir}
             } catch (e) { }
         }
 
-        function showSignalCard(isLong, symbol, price, rsi, tpPrice, slPrice, candleLabel, watchlist, smcOB = false, leverage = MAX_LEVERAGE) {
+        function showSignalCard(isLong, symbol, price, rsi, tpPrice, slPrice, candleLabel, smcOB = false, leverage = MAX_LEVERAGE) {
             const card = document.getElementById('signal-card');
             const dirClass = smcOB
                 ? (isLong ? 'smc-long' : 'smc-short')
-                : watchlist
-                    ? (isLong ? 'watchlist-long' : 'watchlist-short')
-                    : (isLong ? 'long' : 'short');
+                : (isLong ? 'long' : 'short');
             card.className = 'signal-card ' + dirClass;
             card.style.display = 'block';
 
@@ -590,9 +546,7 @@ ${dir}
 
             document.getElementById('signal-title').textContent = smcOB
                 ? (isLong ? '🏛️ SMC OB LONG — Retorno ao Order Block' : '🏛️ SMC OB SHORT — Retorno ao Order Block')
-                : watchlist
-                    ? (isLong ? '🟡 PRÉ-ALERTA LONG — Aguardar EMA21' : '🟡 PRÉ-ALERTA SHORT — Aguardar EMA21')
-                    : (isLong ? '🟢 LONG — Buscar Entrada de Compra' : '🔴 SHORT — Buscar Entrada de Venda');
+                : (isLong ? '🟢 LONG — Buscar Entrada de Compra' : '🔴 SHORT — Buscar Entrada de Venda');
             document.getElementById('sig-symbol').textContent = symbol;
             document.getElementById('sig-trend').textContent = isLong
                 ? '📈 Reversão Bullish — BB %B Extremo'
@@ -885,26 +839,13 @@ ${dir}
             const inGPLong = cur.low <= gpTopLong && cur.close >= gpBottomLong;
             const inGPShort = cur.high >= gpBottomShort && cur.close <= gpTopShort;
 
-            // ── Helper: algum dos 3 últimos candles tocou o OB? ──────────────────
-            function recentTouchOB(obs, isBullish) {
-                return [cur, prev, prev2].some(c => priceInOB(c, obs, isBullish));
-            }
-
-            // ── PRÉ-ALERTA ───────────────────────────────────────────────────────
-            // Condição: 1 dos 3 últimos candles tocou OB + BB %B próximo do extremo
-            const recentLongTouch = recentTouchOB(bullishOBs, true);
-            const recentShortTouch = recentTouchOB(bearishOBs, false);
-            // BB %B verificado apenas no candle atual: "tocou no OB E o BB %B está no extremo agora"
-            const bbpNearOversold = lastBBP <= 0.15;
-            const bbpNearOverbought = lastBBP >= 0.85;
-
             // ── ALERTA FORTE ─────────────────────────────────────────────────────
             // Todos os 5 confirmam: OB (candle atual) + BB %B extremo revertendo
             //   + Vela Ouro/Prata + Swing HH/HL ou LH/LL + Golden Pocket
             const curInLongOB = priceInOB(cur, bullishOBs, true);
             const curInShortOB = priceInOB(cur, bearishOBs, false);
 
-            // ALERTA FORTE — LONG
+            // LONG
             if (curInLongOB && prevBBP <= BBP_OVERSOLD && lastBBP > prevBBP &&
                 hasReversalCandle(true) && isHHHL && inGPLong) {
                 const slPrice = cur.low;
@@ -924,7 +865,7 @@ ${dir}
                 }
             }
 
-            // ALERTA FORTE — SHORT
+            // SHORT
             if (curInShortOB && prevBBP >= BBP_OVERBOUGHT && lastBBP < prevBBP &&
                 hasReversalCandle(false) && isLHLL && inGPShort) {
                 const slPrice = cur.high;
@@ -940,46 +881,6 @@ ${dir}
                         isLong: false, price: cur.close, rsi: lastBBP, tpPrice, slPrice,
                         candle: candleLabel(false) + gpTag + ' 🟥OB',
                         rsiBonus: true, retracePct
-                    };
-                }
-            }
-
-            // PRÉ-ALERTA — LONG
-            // Exige: toque no OB bullish + BB %B próximo da sobrevenda + vela de ouro/prata
-            // Rejeita se o preço também tocou OB bearish (conflito de zona)
-            if (recentLongTouch && bbpNearOversold && !recentShortTouch && hasReversalCandle(true)) {
-                const slPrice = cur.low;
-                const risk = cur.close - slPrice;
-                if (risk > 0) {
-                    const rrTP = cur.close + 2 * risk;
-                    const tpPrice = bbUpper > cur.close ? Math.max(bbUpper, rrTP) : rrTP;
-                    const retracePct = lastSH && lastSL
-                        ? Math.round(((lastSH.price - cur.close) / Math.max(lastSH.price - lastSL.price, 0.0001)) * 100)
-                        : 0;
-                    return {
-                        isLong: true, watchlist: true, price: cur.close, rsi: lastBBP, tpPrice, slPrice,
-                        candle: `${candleLabel(true)} 🟦OB | BB %B: ${lastBBP.toFixed(2)}`,
-                        rsiBonus: false, retracePct
-                    };
-                }
-            }
-
-            // PRÉ-ALERTA — SHORT
-            // Exige: toque no OB bearish + BB %B próximo da sobrecompra + vela de ouro/prata
-            // Rejeita se o preço também tocou OB bullish (conflito de zona)
-            if (recentShortTouch && bbpNearOverbought && !recentLongTouch && hasReversalCandle(false)) {
-                const slPrice = cur.high;
-                const risk = slPrice - cur.close;
-                if (risk > 0) {
-                    const rrTP = cur.close - 2 * risk;
-                    const tpPrice = bbLower < cur.close ? Math.min(bbLower, rrTP) : rrTP;
-                    const retracePct = lastSH && lastSL
-                        ? Math.round(((cur.close - lastSL.price) / Math.max(lastSH.price - lastSL.price, 0.0001)) * 100)
-                        : 0;
-                    return {
-                        isLong: false, watchlist: true, price: cur.close, rsi: lastBBP, tpPrice, slPrice,
-                        candle: `${candleLabel(false)} 🟥OB | BB %B: ${lastBBP.toFixed(2)}`,
-                        rsiBonus: false, retracePct
                     };
                 }
             }
@@ -1078,23 +979,16 @@ ${dir}
                         if (result.smcOB) {
                             const smcDir = result.isLong ? 'OB LONG 🏛️🟢' : 'OB SHORT 🏛️🔴';
                             log(`🏛️ ${symLink} — SMC ${smcDir} | ${trendLbl} | ${result.candle} | BB %B: ${result.rsi.toFixed(2)} | TP: ${result.tpPrice.toFixed(6)} | SL: ${result.slPrice.toFixed(6)}`);
-                            showSignalCard(result.isLong, symbol, result.price, result.rsi, result.tpPrice, result.slPrice, result.candle, false, true, symMaxLev);
+                            showSignalCard(result.isLong, symbol, result.price, result.rsi, result.tpPrice, result.slPrice, result.candle, true, symMaxLev);
                             playAlert(result.isLong);
                             const tgSmcMsg = buildTelegramSmcMsg(result.isLong, symbol, result.price, result.rsi, result.tpPrice, result.slPrice, result.candle, result.retracePct, bank, symMaxLev);
                             sendTelegram(tgSmcMsg)
                                 .then(() => log(`📬 Sinal SMC de ${symLink} enviado para o Telegram!`))
                                 .catch(err => log(`⚠️ Telegram erro (${symbol}): ${err.message}`));
-                        } else if (result.watchlist) {
-                            log(`🟡 ${symLink} — PRÉ-ALERTA ${dir} | ${trendLbl} válida | EMA21 não confirmada | ${result.candle} | TP: ${result.tpPrice.toFixed(6)} | SL: ${result.slPrice.toFixed(6)}`);
-                            showSignalCard(result.isLong, symbol, result.price, result.rsi, result.tpPrice, result.slPrice, result.candle, true, false, symMaxLev);
-                            const tgWatchMsg = buildTelegramWatchlistMsg(result.isLong, symbol, result.price, result.rsi, result.tpPrice, result.slPrice, result.candle, result.retracePct, bank);
-                            sendTelegram(tgWatchMsg)
-                                .then(() => log(`📬 Pré-alerta de ${symLink} enviado para o Telegram!`))
-                                .catch(err => log(`⚠️ Telegram erro (${symbol}): ${err.message}`));
                         } else {
                             const setupLbl = result.isLong ? 'Reversão Bullish' : 'Reversão Bearish';
                             log(`🚀 ${symLink} — ${dir} | BB %B Extremo | ${trendLbl} | ${setupLbl} | ${result.candle} | TP: ${result.tpPrice.toFixed(6)} | SL: ${result.slPrice.toFixed(6)}`);
-                            showSignalCard(result.isLong, symbol, result.price, result.rsi, result.tpPrice, result.slPrice, result.candle, false, false, symMaxLev);
+                            showSignalCard(result.isLong, symbol, result.price, result.rsi, result.tpPrice, result.slPrice, result.candle, false, symMaxLev);
                             playAlert(result.isLong);
                             const tgMsg = buildTelegramMsg(result.isLong, symbol, result.price, result.rsi, result.tpPrice, result.slPrice, result.candle, result.rsiBonus, result.retracePct, bank, symMaxLev);
                             sendTelegram(tgMsg)
@@ -1171,8 +1065,7 @@ ${dir}
             });
 
             log('📊 Bot carregado — OB + BB %B + Vela + Swing + Golden Pocket');
-            log('🟡 PRÉ-ALERTA  : toque OB + BB %B ≤ 0.15/≥ 0.85 + Vela Ouro/Prata + sem conflito de OB oposto');
-            log('🟢🔴 ALERTA FORTE: candle atual no OB + BB %B extremo revertendo + Vela Ouro/Prata + HH/HL ou LH/LL + Golden Pocket 0.705');
+            log('🔴 ALERTA FORTE: candle atual no OB + BB %B extremo revertendo + Vela Ouro/Prata + HH/HL ou LH/LL + Golden Pocket 0.705');
             log('🥇 OURO: range atual > range anterior | 🥈 PRATA: range atual > média dos últimos 3 candles');
             log('📐 TP = BB oposta / RR 2:1 | SL = fundo (long) ou topo (short) do candle de entrada');
 
